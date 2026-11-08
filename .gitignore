@@ -1,0 +1,30 @@
+node_modules/
+dist/
+release/
+.test-data/
+test-results/
+*.log
+.pnpm-store/
+.local-data/
+.tools/
+.packaging/
+*.tsbuildinfo
+
+# Local user data and exported backups
+data/
+runtime/
+backups/
+data.json*
+DOIT-备份-*.json
+*.bak
+
+# Credentials and machine-specific environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.git-credentials
+.npmrc.local

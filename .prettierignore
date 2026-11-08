@@ -1,0 +1,9 @@
+node_modules
+.pnpm-store
+.packaging
+.local-data
+.test-data
+release
+dist
+test-results
+pnpm-lock.yaml
