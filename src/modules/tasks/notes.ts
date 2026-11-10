@@ -37,7 +37,7 @@ export function saveTaskWithNoteTags(data: AppData, task: Task): AppData {
   for (const name of parsed.names) {
     let tag = tags.find((candidate) => tagNameKey(candidate.name) === tagNameKey(name))
     if (!tag) {
-      tag = { id: crypto.randomUUID(), name, color: '#548f76' }
+      tag = { id: crypto.randomUUID(), name, color: '#548f76', pinned: false }
       tags.push(tag)
     }
     tagIds.add(tag.id)

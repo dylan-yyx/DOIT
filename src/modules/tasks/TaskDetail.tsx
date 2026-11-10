@@ -1,10 +1,20 @@
 import { useState } from 'react'
 import type { AppData, Task } from '../../core/types'
-import { isCompleted, progressInfo, progressValue, repeatNames } from './logic'
+import {
+  isCompleted,
+  progressInfo,
+  progressValue,
+  repeatNames,
+  spansMultipleDays,
+  type TaskDates,
+} from './logic'
 import type { ChecklistEdit } from './checklist'
 import TaskNotes from './TaskNotes'
 import TaskChecklist from './TaskChecklist'
-import { dateKey, shortDate, friendlyDate } from '../../core/dates'
+import TaskDateEditor from './TaskDateEditor'
+import InlineTaskTitle from './InlineTaskTitle'
+import { taskDateLabel } from './schedule-labels'
+import { dateKey, shortDate } from '../../core/dates'
 import Icon from '../../components/Icon'
 import Modal from '../../components/Modal'
 export function number(n: number) {
@@ -12,6 +22,7 @@ export function number(n: number) {
 }
 export default function TaskDetail({
   task,
+  width,
   day,
   data,
   onClose,
@@ -22,8 +33,11 @@ export default function TaskDetail({
   onCheck,
   onNotesChange,
   onChecklistEdit,
+  onDateChange,
+  onRename,
 }: {
   task: Task
+  width: number
   day: string
   data: AppData
   onClose: () => void
@@ -34,6 +48,8 @@ export default function TaskDetail({
   onCheck: (id: string) => void
   onNotesChange: (notes: string, convertTags: boolean) => void
   onChecklistEdit: (edit: ChecklistEdit) => void
+  onDateChange: (dates: TaskDates) => void
+  onRename: (title: string) => void
 }) {
   const [logging, setLogging] = useState(false),
     [amount, setAmount] = useState('1'),
@@ -41,6 +57,7 @@ export default function TaskDetail({
     [note, setNote] = useState(''),
     [logError, setLogError] = useState(''),
     [checkRequest, setCheckRequest] = useState(0)
+  const [editingDates, setEditingDates] = useState(false)
   const list = data.lists.find((l) => l.id === task.listId)!,
     info = progressInfo(task),
     done = isCompleted(task, day)
@@ -68,7 +85,7 @@ export default function TaskDetail({
     setLogError('')
   }
   return (
-    <aside className="detail-panel" aria-label="事项详情">
+    <aside className="detail-panel" style={{ width }} aria-label="事项详情">
       <div className="detail-top">
         <span>
           <i className="small-dot" style={{ background: list.color }} />
@@ -90,7 +107,9 @@ export default function TaskDetail({
           {done && <span className="completed-badge">已完成</span>}
         </div>
         <div className="detail-title-row">
-          <h2 className={done ? 'completed-title' : ''}>{task.title}</h2>
+          <h2 className={done ? 'completed-title' : ''}>
+            <InlineTaskTitle title={task.title} onRename={onRename} />
+          </h2>
           {task.kind === 'normal' && (
             <button
               className="icon-button add-checklist-shortcut"
@@ -117,26 +136,28 @@ export default function TaskDetail({
           })}
         </div>
         <div className="detail-metadata">
-          <div>
+          <button
+            type="button"
+            className="detail-date-button"
+            aria-label="设置事项日期"
+            onClick={() => setEditingDates(true)}
+          >
             <Icon name="CalendarDays" size={16} />
             <span>日期</span>
             <strong>
-              {task.kind === 'progress'
-                ? `${shortDate(task.startDate)} — ${shortDate(task.dueDate)}`
-                : task.repeat !== 'none'
-                  ? `${friendlyDate(day)} · 本次`
-                  : task.dueDate
-                    ? friendlyDate(task.dueDate)
-                    : '未安排'}
+              {taskDateLabel(task, day)}
+              {task.repeat !== 'none' ? ' · 本次' : ''}
             </strong>
-          </div>
+            <Icon name="Pencil" size={13} />
+          </button>
           {task.timeMode !== 'allday' && (
             <div>
               <Icon name="Clock3" size={16} />
               <span>时间</span>
               <strong>
-                {task.startTime}
-                {task.timeMode === 'range' ? ` — ${task.endTime}` : ''}
+                {task.kind === 'normal' && spansMultipleDays(task)
+                  ? `${shortDate(task.startDate)} ${task.startTime} — ${shortDate(task.dueDate)} ${task.endTime}`
+                  : task.startTime + (task.timeMode === 'range' ? ` — ${task.endTime}` : '')}
               </strong>
             </div>
           )}
@@ -289,6 +310,16 @@ export default function TaskDetail({
           </button>
         )}
       </div>
+      {editingDates && (
+        <TaskDateEditor
+          task={task}
+          onClose={() => setEditingDates(false)}
+          onSave={(dates) => {
+            onDateChange(dates)
+            setEditingDates(false)
+          }}
+        />
+      )}
       {logging && (
         <Modal
           title="记录一点进展"

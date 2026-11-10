@@ -105,6 +105,15 @@ export interface AssetState {
   startDate: string
   count: number
 }
+export function holdingStatus(state: Pick<AssetState, 'active' | 'count'>) {
+  if (state.active) return 'active'
+  return state.count ? 'closed' : 'pending'
+}
+export function countHoldings(states: AssetState[]) {
+  const counts = { active: 0, closed: 0, pending: 0 }
+  for (const state of states) counts[holdingStatus(state)]++
+  return counts
+}
 export function assetState(product: AssetProduct, records: AssetRecord[]): AssetState {
   const list = orderedRecords(records.filter((r) => r.assetId === product.id))
   const s: AssetState = {

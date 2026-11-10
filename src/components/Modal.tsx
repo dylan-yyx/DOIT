@@ -22,10 +22,13 @@ export default function Modal({
   closeRef.current = onClose
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null
-    const firstInput = ref.current?.querySelector<HTMLElement>(
-      'input:not([type="hidden"]):not([hidden]):not(:disabled),textarea:not(:disabled),select:not(:disabled)',
-    )
-    ;(firstInput || ref.current)?.focus()
+    const firstInput = Array.from(
+      ref.current?.querySelectorAll<HTMLElement>(
+        'input:not([type="hidden"]):not([hidden]):not(:disabled),textarea:not(:disabled),select:not(:disabled)',
+      ) || [],
+    ).find((element) => element.getClientRects().length > 0)
+    const activeTab = ref.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    ;(firstInput || activeTab || ref.current)?.focus()
     function key(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.stopPropagation()

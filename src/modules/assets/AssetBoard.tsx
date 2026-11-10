@@ -7,6 +7,7 @@ import type {
   AssetsData,
 } from '../../core/types'
 import Icon from '../../components/Icon'
+import WorkspaceName from '../../components/WorkspaceName'
 import Modal from '../../components/Modal'
 import { money } from '../finance/logic'
 import { AssetProductEditor, AssetRecordEditor, AssetValuationEditor } from './AssetEditors'
@@ -14,6 +15,8 @@ import {
   assetCategories,
   assetsError,
   assetState,
+  countHoldings,
+  holdingStatus,
   newAsset,
   newAssetRecord,
   orderedRecords,
@@ -36,6 +39,8 @@ type Props = {
 const signed = (n: number) => `${n >= 0 ? '+' : '−'}${money(Math.abs(n))}`
 const gainClass = (n: number) => (n > 0 ? 'asset-gain' : n < 0 ? 'asset-loss' : '')
 type Position = { product: AssetProduct; state: AssetState }
+const holdingLabels = { active: '持有', closed: '已清仓', pending: '未建仓', all: '投资档案' }
+type HoldingFilter = keyof typeof holdingLabels
 export default function AssetBoard({
   data,
   today,
@@ -52,7 +57,7 @@ export default function AssetBoard({
   const [category, setCategory] = useState<AssetCategory | 'all'>('all')
   const [platform, setPlatform] = useState('all')
   const [search, setSearch] = useState('')
-  const [holding, setHolding] = useState('active')
+  const [holding, setHolding] = useState<HoldingFilter>('active')
   const [historyType, setHistoryType] = useState('all')
   const [month, setMonth] = useState('')
   const [productEditor, setProductEditor] = useState<AssetProduct | null>(null)
@@ -87,6 +92,7 @@ export default function AssetBoard({
           .includes(search.trim().toLocaleLowerCase())),
   )
   const active = filtered.filter((p) => p.state.active)
+  const holdingCounts = countHoldings(filtered.map((p) => p.state))
   const totals = filtered.reduce(
     (t, { state: s }) => ({
       value: t.value + s.value,
@@ -101,9 +107,11 @@ export default function AssetBoard({
   const visiblePositions =
     view === 'overview'
       ? active
-      : filtered.filter(
-          (p) => holding === 'all' || (holding === 'active' ? p.state.active : !p.state.active),
-        )
+      : filtered.filter((p) => holding === 'all' || holdingStatus(p.state) === holding)
+  function showHoldings(status: HoldingFilter) {
+    setView('positions')
+    setHolding(status)
+  }
   const ids = new Set(filtered.map((p) => p.product.id))
   const records = orderedRecords(
     assets.records.filter(
@@ -399,15 +407,11 @@ export default function AssetBoard({
   return (
     <>
       <aside className="sidebar asset-sidebar">
-        <div className="workspace-name">
-          <div className="workspace-avatar">
-            <Icon name="Leaf" size={17} />
-          </div>
-          <div>
-            <strong>我的生活空间</strong>
-            <span>看见积累，记录变化</span>
-          </div>
-        </div>
+        <WorkspaceName
+          name={data.preferences.name}
+          subtitle="看见积累，记录变化"
+          onChange={onChange}
+        />
         <nav className="smart-nav" aria-label="投资导航">
           {(
             [
@@ -436,7 +440,7 @@ export default function AssetBoard({
           >
             <Icon name="Layers" size={17} />
             <span>全部投资</span>
-            <small>{positions.length}</small>
+            <small title="当前持有产品数">{positions.filter((p) => p.state.active).length}</small>
           </button>
           {Object.entries(assetCategories).map(([id, c]) => (
             <button
@@ -446,7 +450,7 @@ export default function AssetBoard({
             >
               <Icon name={c.icon} size={17} style={{ color: c.color }} />
               <span>{c.name}</span>
-              <small>
+              <small title="当前持有产品数">
                 {positions.filter((p) => p.product.category === id && p.state.active).length}
               </small>
             </button>
@@ -471,7 +475,8 @@ export default function AssetBoard({
         <div className="main-topline">
           <div className="breadcrumb">
             <Icon name="Landmark" size={14} />
-            资产<span>/</span>我的投资
+            资产<span>/</span>
+            <h1 className="breadcrumb-heading">我的投资</h1>
           </div>
           <div className="main-topline-right">
             <span className={`save-status ${status}`} title={saveError || '更改会自动保存到本机'}>
@@ -500,15 +505,25 @@ export default function AssetBoard({
           </div>
         </div>
         <div className="asset-scroll">
-          <header className="asset-heading">
-            <div>
-              <span className="asset-eyebrow">A LITTLE GROWTH, WELL RECORDED</span>
-              <h1>
-                我的投资 <Icon name="Sprout" size={24} />
-              </h1>
-              <p>记录持有，也记录每一次变化。</p>
-            </div>
-            <div className="asset-heading-actions">
+          <div className="module-summary-row">
+            <section className="asset-summary" aria-label="投资合计">
+              <div data-testid="assets-value">
+                <span>投资市值</span>
+                <strong>¥{money(totals.value)}</strong>
+                <small>各持仓最近一次估值的合计</small>
+              </div>
+              <div data-testid="assets-cost">
+                <span>当前持仓成本</span>
+                <strong>¥{money(totals.cost)}</strong>
+                <small>已扣除卖出部分的成本</small>
+              </div>
+              <div data-testid="assets-profit">
+                <span>累计收益</span>
+                <strong className={gainClass(totals.profit)}>{signed(totals.profit)}</strong>
+                <small>含当前筛选范围内的已清仓收益</small>
+              </div>
+            </section>
+            <div className="module-summary-actions">
               <button
                 className="button secondary"
                 disabled={!assets.products.length}
@@ -522,12 +537,31 @@ export default function AssetBoard({
                 新增投资
               </button>
             </div>
-          </header>
+          </div>
           <div className="asset-filterbar">
-            <span>
-              {category === 'all' ? '全部类型' : assetCategories[category].name} · {filtered.length}{' '}
-              项产品
-            </span>
+            <div className="asset-filter-counts">
+              <span>
+                {category === 'all' ? '全部类型' : assetCategories[category].name} ·{' '}
+                {view === 'history'
+                  ? `投资档案 ${filtered.length} 项`
+                  : `${holdingLabels[view === 'overview' ? 'active' : holding]} ${visiblePositions.length} 项`}
+              </span>
+              {view === 'overview' &&
+                (['pending', 'closed'] as const).map(
+                  (status) =>
+                    holdingCounts[status] > 0 && (
+                      <button
+                        type="button"
+                        className="asset-text-button"
+                        key={status}
+                        onClick={() => showHoldings(status)}
+                      >
+                        {holdingLabels[status]} {holdingCounts[status]} 项
+                        <Icon name="ChevronRight" size={11} />
+                      </button>
+                    ),
+                )}
+            </div>
             <label>
               持有平台
               <select
@@ -544,23 +578,6 @@ export default function AssetBoard({
               </select>
             </label>
           </div>
-          <section className="asset-summary" aria-label="投资合计">
-            <div data-testid="assets-value">
-              <span>投资市值</span>
-              <strong>¥{money(totals.value)}</strong>
-              <small>各持仓最近一次估值的合计</small>
-            </div>
-            <div data-testid="assets-cost">
-              <span>当前持仓成本</span>
-              <strong>¥{money(totals.cost)}</strong>
-              <small>已扣除卖出部分的成本</small>
-            </div>
-            <div data-testid="assets-profit">
-              <span>累计收益</span>
-              <strong className={gainClass(totals.profit)}>{signed(totals.profit)}</strong>
-              <small>含当前筛选范围内的已清仓收益</small>
-            </div>
-          </section>
           <div className="asset-profit-breakdown">
             <span>收益构成</span>
             <span>
@@ -610,10 +627,11 @@ export default function AssetBoard({
                     <select
                       aria-label="持仓状态"
                       value={holding}
-                      onChange={(e) => setHolding(e.target.value)}
+                      onChange={(e) => setHolding(e.target.value as HoldingFilter)}
                     >
                       <option value="active">正在持有</option>
-                      <option value="closed">已清仓 / 空仓</option>
+                      <option value="closed">已清仓</option>
+                      <option value="pending">未建仓</option>
                       <option value="all">全部产品</option>
                     </select>
                   )}
@@ -671,14 +689,8 @@ export default function AssetBoard({
                       ? '当前筛选下没有正在持有的投资。'
                       : '当前筛选下没有持仓。'}
                   </p>
-                  <button
-                    className="asset-text-button"
-                    onClick={() => {
-                      setView('positions')
-                      setHolding('all')
-                    }}
-                  >
-                    查看全部产品与已清仓历史
+                  <button className="asset-text-button" onClick={() => showHoldings('all')}>
+                    查看全部投资档案
                   </button>
                 </div>
               )}

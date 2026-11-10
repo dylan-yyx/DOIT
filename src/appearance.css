@@ -124,19 +124,11 @@
 .side-row.active > svg {
   color: var(--theme-accent);
 }
-.main-heading h1,
-.habit-heading h1,
-.finance-heading h1,
-.asset-heading h1,
 .modal-heading h2,
 .settings-summary strong {
   color: var(--theme-text);
 }
-.day-overview,
-.habit-day-summary,
 .habit-side-note,
-.finance-summary,
-.asset-summary,
 .settings-stats {
   background: var(--summary-surface);
   border-color: var(--line);

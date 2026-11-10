@@ -177,7 +177,10 @@ export function habitMonthStats(habit: Habit, month: string, today = dateKey()) 
     rate: days.length ? Math.round((done / days.length) * 100) : 0,
   }
 }
-export function createHabitSeed(today = dateKey()): { habits: Habit[]; habitGroups: HabitGroup[] } {
+export function createHabitExamples(today = dateKey()): {
+  habits: Habit[]
+  habitGroups: HabitGroup[]
+} {
   const habitGroups = [
     { id: 'habit-growth', name: '学习成长', color: habitColors[0] },
     { id: 'habit-health', name: '健康生活', color: habitColors[1] },
@@ -209,7 +212,10 @@ export function createHabitSeed(today = dateKey()): { habits: Habit[]; habitGrou
   })
   return { habits, habitGroups }
 }
-// v1 backups made before this module remain valid; initialize examples only once.
+export function createHabitSeed(): { habits: Habit[]; habitGroups: HabitGroup[] } {
+  return { habits: [], habitGroups: [] }
+}
+// Older backups receive an empty habit module.
 export function withHabitData(data: AppData): AppData {
   if (data.habits !== undefined) return { ...data, habitGroups: data.habitGroups || [] }
   return { ...data, ...createHabitSeed() }

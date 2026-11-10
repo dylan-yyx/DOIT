@@ -1,5 +1,15 @@
+import { useState } from 'react'
 import type { AppData } from '../core/types'
+import { modules, type ModuleId } from '../modules/registry'
 import Icon from './Icon'
+import { assetState, countHoldings } from '../modules/assets/logic'
+
+const clearDetails: Record<ModuleId, string> = {
+  tasks: '清空事项、清单、文件夹和标签，重建收集箱。',
+  habits: '清空习惯、分组和打卡记录。',
+  finance: '清空账目、回款和自定义账户与分类，恢复默认账户及分类，期初余额归零。',
+  assets: '清空投资产品、交易和估值记录。',
+}
 
 export default function DataSettings({
   data,
@@ -8,6 +18,8 @@ export default function DataSettings({
   saveError,
   onExport,
   onImport,
+  onRequestClear,
+  clearBackup,
 }: {
   data: AppData
   path: string
@@ -15,7 +27,21 @@ export default function DataSettings({
   saveError: string
   onExport: () => void
   onImport: () => void
+  onRequestClear: (selected: ModuleId[]) => void
+  clearBackup: string
 }) {
+  const [selected, setSelected] = useState<ModuleId[]>([])
+  const assets = data.assets
+  const assetCounts = countHoldings(
+    assets ? assets.products.map((p) => assetState(p, assets.records)) : [],
+  )
+  const assetBreakdown = [
+    `持有 ${assetCounts.active}`,
+    assetCounts.pending ? `未建仓 ${assetCounts.pending}` : '',
+    assetCounts.closed ? `已清仓 ${assetCounts.closed}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <div className="data-settings">
       <section aria-labelledby="data-overview-heading">
@@ -27,12 +53,18 @@ export default function DataSettings({
             { label: '待办事项', count: data.tasks.length, icon: 'CheckCheck' },
             { label: '习惯', count: data.habits?.length || 0, icon: 'Flame' },
             { label: '账目', count: data.finance?.entries.length || 0, icon: 'Wallet' },
-            { label: '投资产品', count: data.assets?.products.length || 0, icon: 'Landmark' },
+            {
+              label: '投资档案',
+              count: data.assets?.products.length || 0,
+              icon: 'Landmark',
+              breakdown: assetBreakdown,
+            },
           ].map((item) => (
             <div key={item.label}>
               <Icon name={item.icon} size={17} />
               <strong>{item.count}</strong>
               <span>{item.label}</span>
+              {item.breakdown && <small>{item.breakdown}</small>}
             </div>
           ))}
         </div>
@@ -70,6 +102,52 @@ export default function DataSettings({
           </div>
         </div>
       </section>
+      <section aria-labelledby="data-clear-heading">
+        <h3 id="data-clear-heading" className="settings-section-title">
+          清空模块数据
+        </h3>
+        <div className="settings-card clear-data-card">
+          <fieldset aria-label="选择要清空的模块">
+            {modules.map(({ id, name }) => (
+              <label key={id} className="clear-data-option">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(id)}
+                  aria-label={`清空${name}数据`}
+                  onChange={(event) =>
+                    setSelected(
+                      event.target.checked
+                        ? [...selected, id]
+                        : selected.filter((value) => value !== id),
+                    )
+                  }
+                />
+                <span>
+                  <strong>{name}</strong>
+                  <small>{clearDetails[id]}</small>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <div className="clear-data-actions">
+            <p className="clear-data-note">
+              {status === 'error' ? '请先解决保存错误。' : '可勾选一个或多个模块，验证后一次清空。'}
+            </p>
+            <button
+              className="button danger-button"
+              disabled={!selected.length || status !== 'saved'}
+              onClick={() => onRequestClear(selected)}
+            >
+              清空所选模块
+            </button>
+          </div>
+          {clearBackup && (
+            <p className="clear-data-note clear-backup-location">
+              清空前的备份<code>{clearBackup}</code>
+            </p>
+          )}
+        </div>
+      </section>
       <section aria-labelledby="data-storage-heading">
         <h3 id="data-storage-heading" className="settings-section-title">
           本地存储
@@ -101,7 +179,8 @@ export default function DataSettings({
           </div>
         </div>
         <p className="data-storage-hint">
-          安装版数据保存在用户目录，便携版数据保存在软件旁的 data 文件夹。建议定期导出备份，留存一份生活记录。
+          安装版数据保存在用户目录，便携版数据保存在软件旁的 data
+          文件夹。建议定期导出备份，留存一份生活记录。
         </p>
       </section>
     </div>

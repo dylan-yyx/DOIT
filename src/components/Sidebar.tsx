@@ -1,23 +1,95 @@
+import { useId, useRef } from 'react'
 import type { AppData, Filter } from '../core/types'
 import { dateKey } from '../core/dates'
 import { isCompleted, occursOn } from '../modules/tasks/logic'
-import type { EntityKind, Entity } from './EntityEditor'
+import { moveSidebarEntry, sidebarRoots } from '../modules/tasks/order'
+import { useReorderDrag } from '../modules/tasks/useReorderDrag'
+import type { EntityDraft } from './EntityEditor'
 import Icon from './Icon'
+import WorkspaceName from './WorkspaceName'
+
+function FolderActions({
+  name,
+  onEdit,
+  onAdd,
+}: {
+  name: string
+  onEdit: () => void
+  onAdd: () => void
+}) {
+  const id = useId()
+  const menu = useRef<HTMLDivElement>(null)
+  return (
+    <>
+      <button
+        type="button"
+        className="icon-button folder-menu-trigger"
+        aria-label={`文件夹操作 ${name}`}
+        title="文件夹操作"
+        popoverTarget={id}
+      >
+        <Icon name="MoreHorizontal" size={15} />
+      </button>
+      <div
+        className="folder-menu"
+        id={id}
+        ref={menu}
+        popover="auto"
+        role="group"
+        aria-label={`${name}的操作`}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            menu.current?.hidePopover()
+            onEdit()
+          }}
+        >
+          <Icon name="Pencil" size={14} />
+          编辑文件夹
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            menu.current?.hidePopover()
+            onAdd()
+          }}
+        >
+          <Icon name="Plus" size={14} />
+          添加新清单
+        </button>
+      </div>
+    </>
+  )
+}
+
 export default function Sidebar({
   data,
+  width,
   filter,
   onFilter,
   onEntity,
   onCollapse,
   onSettings,
+  onManageTags,
+  onChange,
 }: {
   data: AppData
+  width: number
   filter: Filter
   onFilter: (f: Filter) => void
-  onEntity: (kind: EntityKind, initial?: Entity) => void
+  onEntity: (draft: EntityDraft) => void
   onCollapse: (id: string) => void
   onSettings: () => void
+  onManageTags: () => void
+  onChange: (fn: (data: AppData) => AppData) => void
 }) {
+  const reorder = useReorderDrag((source, target, side) =>
+    onChange((current) => moveSidebarEntry(current, source, target, side)),
+  )
+  const roots = sidebarRoots(data)
+  const rootKeys = roots.map(({ kind, item }) => `${kind}:${item.id}`)
+  const movingList = reorder.source.startsWith('list:')
   const today = dateKey(),
     active = (kind: Filter['kind'], id: string) => filter.kind === kind && filter.id === id
   const pending = data.tasks.filter((t) => !isCompleted(t, today))
@@ -39,8 +111,22 @@ export default function Sidebar({
       count: pending.filter((t) => t.listId === 'inbox').length,
     },
   ]
-  const list = (l: AppData['lists'][number]) => (
-    <div key={l.id} className={`side-row-wrap ${active('list', l.id) ? 'active' : ''}`}>
+  const list = (l: AppData['lists'][number], siblings: string[]) => (
+    <div
+      key={`list:${l.id}`}
+      data-sidebar-key={`list:${l.id}`}
+      className={`side-row-wrap sortable-sidebar-row ${active('list', l.id) ? 'active' : ''}`}
+      {...reorder.target(`list:${l.id}`, { accepts: !l.folderId || movingList })}
+    >
+      <button
+        type="button"
+        className="sort-handle"
+        aria-label={`排序清单 ${l.name}`}
+        title="拖动排序 · Alt + ↑ / ↓"
+        {...reorder.handle(`list:${l.id}`, siblings)}
+      >
+        <Icon name="GripVertical" size={12} />
+      </button>
       <button className="side-row" onClick={() => onFilter({ kind: 'list', id: l.id })}>
         <Icon name={l.icon} size={17} style={{ color: l.color }} />
         <span>{l.name}</span>
@@ -49,24 +135,19 @@ export default function Sidebar({
       <button
         className="row-edit icon-button"
         aria-label={`编辑清单 ${l.name}`}
-        onClick={() => onEntity('list', l)}
+        onClick={() => onEntity({ kind: 'list', initial: l })}
       >
         <Icon name="MoreHorizontal" size={15} />
       </button>
     </div>
   )
   return (
-    <aside className="sidebar">
-      <div className="workspace-name">
-        <div className="workspace-avatar">
-          <Icon name="Leaf" size={17} />
-        </div>
-        <div>
-          <strong>我的生活空间</strong>
-          <span>一点一滴，井井有条</span>
-        </div>
-        <Icon name="ChevronDown" size={14} />
-      </div>
+    <aside className="sidebar task-sidebar" style={{ width }}>
+      <WorkspaceName
+        name={data.preferences.name}
+        subtitle="一点一滴，井井有条"
+        onChange={onChange}
+      />
       <nav className="smart-nav" aria-label="待办视图">
         {smart.map((s) => (
           <button
@@ -87,39 +168,58 @@ export default function Sidebar({
             className="icon-button"
             aria-label="新建清单或文件夹"
             title="新建清单或文件夹"
-            onClick={() => onEntity('list')}
+            onClick={() => onEntity({ kind: 'list' })}
           >
             <Icon name="Plus" size={16} />
           </button>
         </div>
         <div className="list-tree">
-          {data.lists.filter((l) => !l.folderId && l.id !== 'inbox').map(list)}
-          {data.folders.map((folder) => (
-            <div className="folder-group" key={folder.id}>
-              <div className="folder-heading">
-                <button onClick={() => onCollapse(folder.id)}>
-                  <Icon name={folder.collapsed ? 'ChevronRight' : 'ChevronDown'} size={12} />
-                  <Icon name={folder.icon} size={15} style={{ color: folder.color }} />
-                  <span>{folder.name}</span>
-                </button>
-                <button
-                  className="icon-button row-edit"
-                  aria-label={`编辑文件夹 ${folder.name}`}
-                  onClick={() => onEntity('folder', folder)}
+          {roots.map(({ kind, item }) => {
+            if (kind === 'list') return list(item, rootKeys)
+            const folder = item
+            const children = data.lists.filter((l) => l.folderId === folder.id)
+            const childKeys = children.map((l) => `list:${l.id}`)
+            return (
+              <div className="folder-group" key={`folder:${folder.id}`}>
+                <div
+                  className="folder-heading"
+                  data-sidebar-key={`folder:${folder.id}`}
+                  {...reorder.target(`folder:${folder.id}`, { inside: movingList })}
                 >
-                  <Icon name="MoreHorizontal" size={14} />
-                </button>
-              </div>
-              {!folder.collapsed && (
-                <div className="folder-lists">
-                  {data.lists.filter((l) => l.folderId === folder.id).map(list)}
-                  {!data.lists.some((l) => l.folderId === folder.id) && (
-                    <span className="empty-folder">还没有清单</span>
-                  )}
+                  <button aria-expanded={!folder.collapsed} onClick={() => onCollapse(folder.id)}>
+                    <Icon name={folder.collapsed ? 'ChevronRight' : 'ChevronDown'} size={12} />
+                    <Icon name={folder.icon} size={15} style={{ color: folder.color }} />
+                    <span>{folder.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="sort-handle"
+                    aria-label={`排序文件夹 ${folder.name}`}
+                    title="拖动排序 · Alt + ↑ / ↓"
+                    {...reorder.handle(`folder:${folder.id}`, rootKeys)}
+                  >
+                    <Icon name="GripVertical" size={12} />
+                  </button>
+                  <FolderActions
+                    name={folder.name}
+                    onEdit={() => onEntity({ kind: 'folder', initial: folder })}
+                    onAdd={() => onEntity({ kind: 'list', folderId: folder.id })}
+                  />
                 </div>
-              )}
+                {!folder.collapsed && (
+                  <div className="folder-lists">
+                    {children.map((l) => list(l, childKeys))}
+                    {!children.length && <span className="empty-folder">还没有清单</span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {movingList && (
+            <div className="sidebar-root-drop" {...reorder.target('root', { append: true })}>
+              拖到这里移至外层
             </div>
-          ))}
+          )}
           {!data.folders.length && data.lists.length === 1 && (
             <div className="empty-folder">建立清单，整理你的日常。</div>
           )}
@@ -130,27 +230,45 @@ export default function Sidebar({
             className="icon-button"
             aria-label="新建标签"
             title="新建标签"
-            onClick={() => onEntity('tag')}
+            onClick={() => onEntity({ kind: 'tag' })}
           >
             <Icon name="Plus" size={16} />
           </button>
         </div>
         <div className="sidebar-tags">
-          {data.tags.map((tag) => (
-            <div key={tag.id} className={`side-row-wrap ${active('tag', tag.id) ? 'active' : ''}`}>
-              <button className="side-row" onClick={() => onFilter({ kind: 'tag', id: tag.id })}>
-                <Icon name="Hash" size={16} style={{ color: tag.color }} />
-                <span>{tag.name}</span>
-              </button>
-              <button
-                className="row-edit icon-button"
-                aria-label={`编辑标签 ${tag.name}`}
-                onClick={() => onEntity('tag', tag)}
+          {data.tags
+            .filter((tag) => tag.pinned || active('tag', tag.id))
+            .map((tag) => (
+              <div
+                key={tag.id}
+                className={`side-row-wrap ${active('tag', tag.id) ? 'active' : ''}`}
               >
-                <Icon name="MoreHorizontal" size={14} />
-              </button>
-            </div>
-          ))}
+                <button className="side-row" onClick={() => onFilter({ kind: 'tag', id: tag.id })}>
+                  <Icon name="Hash" size={16} style={{ color: tag.color }} />
+                  <span>{tag.name}</span>
+                  {!tag.pinned && <small title="当前筛选，未固定到侧栏">当前</small>}
+                </button>
+                <button
+                  className="row-edit icon-button"
+                  aria-label={`编辑标签 ${tag.name}`}
+                  onClick={() => onEntity({ kind: 'tag', initial: tag })}
+                >
+                  <Icon name="MoreHorizontal" size={14} />
+                </button>
+              </div>
+            ))}
+          {!data.tags.some((tag) => tag.pinned || active('tag', tag.id)) && (
+            <p className="sidebar-tag-hint">将常用标签固定在这里。</p>
+          )}
+          <button
+            className="side-row manage-tags-entry"
+            aria-label="管理标签"
+            onClick={onManageTags}
+          >
+            <Icon name="Tags" size={16} />
+            <span>管理标签</span>
+            <small>{data.tags.length || ''}</small>
+          </button>
         </div>
       </div>
       <div className="sidebar-bottom">

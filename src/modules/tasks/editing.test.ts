@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSeed } from '../../core/seed'
+import { createLegacySeed as createSeed } from '../../core/legacy-examples'
 import { newTask, toggleCheck, toggleComplete, isCompleted, validateData } from './logic'
 import { parseNoteTags, saveTaskWithNoteTags } from './notes'
 import { editChecklist } from './checklist'

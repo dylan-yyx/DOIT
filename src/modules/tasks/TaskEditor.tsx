@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import type { AppData, Task } from '../../core/types'
 import { dateKey } from '../../core/dates'
-import { repeatNames } from './logic'
+import { repeatNames, spansMultipleDays, taskDateDraft, taskDateError } from './logic'
+import TaskScheduleFields from './TaskScheduleFields'
 import { parseNoteTags } from './notes'
 import Modal from '../../components/Modal'
 import Icon from '../../components/Icon'
+import TagPicker from '../../components/TagPicker'
 export default function TaskEditor({
   initial,
   data,
@@ -16,7 +18,10 @@ export default function TaskEditor({
   onSave: (task: Task) => void
   onClose: () => void
 }) {
-  const [task, setTask] = useState<Task>(structuredClone(initial)),
+  const [task, setTask] = useState<Task>(() => ({
+      ...structuredClone(initial),
+      ...taskDateDraft(initial),
+    })),
     [error, setError] = useState('')
   const set = <K extends keyof Task>(key: K, value: Task[K]) =>
     setTask((old) => ({ ...old, [key]: value }))
@@ -27,31 +32,17 @@ export default function TaskEditor({
       setError('先给事项起一个名字吧。')
       return
     }
-    if (task.startDate && task.dueDate && task.startDate > task.dueDate) {
-      setError('结束日期需要晚于或等于开始日期。')
+    const dateError = taskDateError(task)
+    if (dateError) {
+      setError(dateError)
       return
     }
-    if (
-      task.kind === 'progress' &&
-      (!task.startDate || !task.dueDate || task.total <= 0 || !Number.isFinite(task.total))
-    ) {
+    if (task.kind === 'progress' && (task.total <= 0 || !Number.isFinite(task.total))) {
       setError('请填写进度目标和完整的起止日期。')
-      return
-    }
-    if (task.repeat !== 'none' && !task.dueDate) {
-      setError('重复事项需要设置开始日期。')
       return
     }
     if (task.repeat === 'custom' && !task.repeatDays.length) {
       setError('请至少选择一个重复的星期。')
-      return
-    }
-    if (task.repeatUntil && task.repeatUntil < (task.startDate || task.dueDate)) {
-      setError('重复截止日期不能早于开始日期。')
-      return
-    }
-    if (task.timeMode === 'range' && task.endTime <= task.startTime) {
-      setError('结束时间需晚于开始时间；跨天事项请分开安排。')
       return
     }
     if (task.entries.reduce((n, e) => n + e.amount, 0) > task.total && task.kind === 'progress') {
@@ -60,6 +51,7 @@ export default function TaskEditor({
     }
     onSave({
       ...task,
+      ...taskDateDraft(task),
       title: task.title.trim(),
       checklist: task.checklist
         .filter((c) => c.title.trim())
@@ -90,7 +82,18 @@ export default function TaskEditor({
           <button
             type="button"
             className={task.kind === 'normal' ? 'active' : ''}
-            onClick={() => set('kind', 'normal')}
+            onClick={() =>
+              setTask((old) =>
+                old.kind === 'normal'
+                  ? old
+                  : {
+                      ...old,
+                      kind: 'normal',
+                      dateMode: 'range',
+                      timeMode: 'allday',
+                    },
+              )
+            }
           >
             <Icon name="CircleCheck" />
             普通事项
@@ -98,14 +101,21 @@ export default function TaskEditor({
           <button
             type="button"
             className={task.kind === 'progress' ? 'active' : ''}
-            onClick={() => {
-              set('kind', 'progress')
-              set('repeat', 'none')
-              if (!task.dueDate) {
-                set('dueDate', dateKey())
-                set('startDate', dateKey())
-              }
-            }}
+            onClick={() =>
+              setTask((old) =>
+                old.kind === 'progress'
+                  ? old
+                  : {
+                      ...old,
+                      kind: 'progress',
+                      dateMode: undefined,
+                      repeat: 'none',
+                      timeMode: 'allday',
+                      startDate: old.startDate || old.dueDate || dateKey(),
+                      dueDate: old.dueDate || dateKey(),
+                    },
+              )
+            }
           >
             <Icon name="ChartNoAxesCombined" />
             进度事项
@@ -135,43 +145,12 @@ export default function TaskEditor({
             </select>
           </label>
         </div>
-        <div className="form-grid">
-          {task.kind === 'progress' && (
-            <label>
-              开始日期
-              <input
-                type="date"
-                value={task.startDate}
-                required
-                onChange={(e) => set('startDate', e.target.value)}
-              />
-            </label>
-          )}
-          <label>
-            {task.kind === 'progress' ? '结束日期' : '日期'}
-            <input
-              type="date"
-              value={task.dueDate}
-              onChange={(e) => {
-                set('dueDate', e.target.value)
-                if (task.kind === 'normal') set('startDate', e.target.value)
-              }}
-            />
-          </label>
-          {task.kind === 'normal' && (
-            <label>
-              时间方式
-              <select
-                value={task.timeMode}
-                onChange={(e) => set('timeMode', e.target.value as Task['timeMode'])}
-              >
-                <option value="allday">全天 / 不指定时间</option>
-                <option value="point">具体时间点</option>
-                <option value="range">时间段</option>
-              </select>
-            </label>
-          )}
-        </div>
+        <TaskScheduleFields
+          dates={task}
+          kind={task.kind}
+          repeat={task.repeat}
+          onChange={(dates) => setTask((old) => ({ ...old, ...dates }))}
+        />
         {task.kind === 'progress' ? (
           <div className="progress-editor">
             <div className="form-grid">
@@ -203,30 +182,6 @@ export default function TaskEditor({
           </div>
         ) : (
           <>
-            {task.timeMode !== 'allday' && (
-              <div className="form-grid">
-                <label>
-                  开始时间
-                  <input
-                    type="time"
-                    value={task.startTime}
-                    required
-                    onChange={(e) => set('startTime', e.target.value)}
-                  />
-                </label>
-                {task.timeMode === 'range' && (
-                  <label>
-                    结束时间
-                    <input
-                      type="time"
-                      value={task.endTime}
-                      required
-                      onChange={(e) => set('endTime', e.target.value)}
-                    />
-                  </label>
-                )}
-              </div>
-            )}
             <div className="form-grid">
               <label>
                 重复方式
@@ -235,7 +190,7 @@ export default function TaskEditor({
                   onChange={(e) => set('repeat', e.target.value as Task['repeat'])}
                 >
                   {Object.entries(repeatNames).map(([id, name]) => (
-                    <option key={id} value={id}>
+                    <option key={id} value={id} disabled={id !== 'none' && spansMultipleDays(task)}>
                       {name}
                     </option>
                   ))}
@@ -275,32 +230,12 @@ export default function TaskEditor({
             )}
           </>
         )}
-        <label>
-          标签<span className="field-hint">可跨清单分类</span>
-          <div className="tag-picker">
-            {data.tags.map((tag) => (
-              <button
-                type="button"
-                key={tag.id}
-                className={task.tagIds.includes(tag.id) ? 'tag-option selected' : 'tag-option'}
-                style={{ '--tag-color': tag.color } as React.CSSProperties}
-                onClick={() =>
-                  set(
-                    'tagIds',
-                    task.tagIds.includes(tag.id)
-                      ? task.tagIds.filter((id) => id !== tag.id)
-                      : [...task.tagIds, tag.id],
-                  )
-                }
-              >
-                <Icon name="Hash" size={13} />
-                {tag.name}
-                {task.tagIds.includes(tag.id) && <Icon name="Check" size={12} />}
-              </button>
-            ))}
-            {!data.tags.length && <span className="muted">可在侧边栏添加标签</span>}
+        <div>
+          <div className="field-label">
+            标签<span className="field-hint">可跨清单分类</span>
           </div>
-        </label>
+          <TagPicker data={data} selected={task.tagIds} onChange={(ids) => set('tagIds', ids)} />
+        </div>
         <label>
           备注
           <textarea

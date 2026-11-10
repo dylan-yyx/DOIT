@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppData, Filter, Task, View } from './core/types'
+import type { AppData, Filter, Tag, Task, TaskSort, View } from './core/types'
 import {
   addDays,
   dateKey,
@@ -8,54 +8,69 @@ import {
   parseDate,
   shortDate,
   startOfWeek,
-  weekdays,
 } from './core/dates'
 import { createSeed } from './core/seed'
 import { exportData, loadData, saveData } from './core/storage'
+import { clearModuleData } from './core/clear-modules'
 import { modules, type ModuleId } from './modules/registry'
 import { saveTaskWithNoteTags } from './modules/tasks/notes'
 import { editChecklist, type ChecklistEdit } from './modules/tasks/checklist'
 import {
   isCompleted,
   newTask,
-  nextOccurrence,
   occursOn,
+  spansMultipleDays,
+  taskDisplayDay,
   toggleCheck,
   toggleComplete,
   validateData,
+  type TaskDates,
 } from './modules/tasks/logic'
 import Icon from './components/Icon'
+import CompletionSummary from './components/CompletionSummary'
 import Modal from './components/Modal'
+import ClearModulesDialog from './components/ClearModulesDialog'
 import Sidebar from './components/Sidebar'
-import EntityEditor, { type Entity, type EntityKind } from './components/EntityEditor'
+import EntityEditor, {
+  type Entity,
+  type EntityDraft,
+  type EntityKind,
+} from './components/EntityEditor'
 import TaskEditor from './modules/tasks/TaskEditor'
 import TaskDetail from './modules/tasks/TaskDetail'
+import TaskPaneGrip, { useTaskPaneWidths } from './modules/tasks/TaskPaneGrip'
 import TaskListView, { type TaskRow } from './modules/tasks/TaskListView'
 import CalendarView from './modules/tasks/CalendarView'
+import { moveOrder, type DropSide } from './modules/tasks/order'
 import HabitBoard from './modules/habits/HabitBoard'
-import { withHabitData } from './modules/habits/logic'
 import FinanceBoard from './modules/finance/FinanceBoard'
-import { withFinanceData } from './modules/finance/logic'
 import AssetBoard from './modules/assets/AssetBoard'
-import { withAssetsData } from './modules/assets/logic'
-import SettingsDialog from './components/SettingsDialog'
+import SettingsDialog, { type SettingsSectionId } from './components/SettingsDialog'
 import { applyAppearance } from './core/appearance'
+import { upgradeData } from './core/migrations'
+import { saveTag } from './modules/tasks/tags'
+
+const titleOrder = new Intl.Collator('zh-CN-u-co-pinyin', { numeric: true })
 
 export default function App() {
   const [data, setData] = useState<AppData | null>(null),
     [bootError, setBootError] = useState(''),
     [module, setModule] = useState<ModuleId>('tasks')
   const [filter, setFilter] = useState<Filter>({ kind: 'smart', id: 'today' }),
-    [view, setView] = useState<View>('list'),
+    [calendarView, setCalendarView] = useState<Exclude<View, 'list'>>('month'),
     [anchor, setAnchor] = useState(dateKey()),
     [today, setToday] = useState(dateKey)
   const [selected, setSelected] = useState<{ id: string; day: string } | null>(null),
     [editor, setEditor] = useState<Task | null>(null),
-    [entity, setEntity] = useState<{ kind: EntityKind; initial?: Entity } | null>(null)
+    [entity, setEntity] = useState<EntityDraft | null>(null)
+  const [detailOpen, setDetailOpen] = useState(true)
   const [settings, setSettings] = useState(false),
-    [sort, setSort] = useState<'time' | 'priority' | 'created'>('time'),
     [filtersOpen, setFiltersOpen] = useState(false),
     [search, setSearch] = useState('')
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('appearance')
+  const [clearRequest, setClearRequest] = useState<ModuleId[] | null>(null)
+  const [clearBackup, setClearBackup] = useState('')
+  const [moduleReset, setModuleReset] = useState(0)
   const [toast, setToast] = useState<{ message: string; undo?: () => void } | null>(null),
     [status, setStatus] = useState<'saving' | 'saved' | 'error'>('saved'),
     [saveError, setSaveError] = useState(''),
@@ -69,6 +84,7 @@ export default function App() {
     [pendingImport, setPendingImport] = useState<AppData | null>(null)
   const searchRef = useRef<HTMLInputElement>(null),
     importRef = useRef<HTMLInputElement>(null)
+  const savedClear = useRef<AppData | null>(null)
   const notify = useCallback(
     (message: string, undo?: () => void) => setToast({ message, undo }),
     [],
@@ -98,7 +114,6 @@ export default function App() {
         if (active) {
           const initial = value || createSeed()
           setData(initial)
-          if (!value) setSelected({ id: 'read', day: dateKey() })
         }
       })
       .catch((e) => {
@@ -111,6 +126,10 @@ export default function App() {
   }, [])
   useEffect(() => {
     if (!data || bootError) return
+    if (data === savedClear.current) {
+      savedClear.current = null
+      return
+    }
     let active = true
     setStatus('saving')
     saveData(data)
@@ -138,6 +157,12 @@ export default function App() {
   const change = useCallback((fn: (d: AppData) => AppData) => setData((d) => (d ? fn(d) : d)), [])
   function patchTask(task: Task) {
     change((d) => ({ ...d, tasks: d.tasks.map((t) => (t.id === task.id ? task : t)) }))
+  }
+  function renameTask(id: string, title: string) {
+    change((d) => ({
+      ...d,
+      tasks: d.tasks.map((task) => (task.id === id ? { ...task, title } : task)),
+    }))
   }
   function changeNotes(id: string, notes: string, convertTags: boolean) {
     change((d) => {
@@ -173,6 +198,7 @@ export default function App() {
       if (
         (e.ctrlKey || e.metaKey) &&
         e.key.toLowerCase() === 'k' &&
+        !document.querySelector('[role="dialog"]') &&
         module !== 'finance' &&
         module !== 'assets'
       ) {
@@ -198,10 +224,19 @@ export default function App() {
     setAnchor(today)
     setSelected(null)
     setFiltersOpen(false)
+    if (f.kind === 'smart' && f.id === 'all') setCalendarView('month')
   }
   function selectTask(id: string, day: string) {
     setSelected({ id, day })
+    setDetailOpen(true)
   }
+  useEffect(() => {
+    if (data && filter.kind === 'tag' && !data.tags.some((tag) => tag.id === filter.id)) {
+      setFilter({ kind: 'smart', id: 'all' })
+      setCalendarView('month')
+      setSelected(null)
+    }
+  }, [data?.tags, filter])
   const filteredTasks = useMemo(() => {
     if (!data) return []
     let tasks = data.tasks
@@ -226,15 +261,16 @@ export default function App() {
       )
     return tasks
   }, [data, filter, search, today])
+  const searching = Boolean(search.trim())
+  const view = !searching && filter.kind === 'smart' && filter.id === 'all' ? calendarView : 'list'
+  const sortScope = searching ? 'search' : `${filter.kind}:${filter.id}`
+  const listSorting = data?.taskListSorting?.[sortScope]
+  const sort = listSorting?.mode || data?.preferences.taskSort || 'time'
   const rows = useMemo(() => {
-    let result: TaskRow[] = []
+    const result: TaskRow[] = []
     for (const task of filteredTasks) {
       if (search.trim()) {
-        result.push({
-          task,
-          day:
-            task.repeat === 'none' ? task.dueDate || today : nextOccurrence(task, today) || today,
-        })
+        result.push({ task, day: taskDisplayDay(task, today) })
         continue
       }
       if (filter.kind === 'smart' && filter.id === 'completed') {
@@ -251,32 +287,81 @@ export default function App() {
             task.dueDate < anchor &&
             !isCompleted(task, anchor))
         )
-          result.push({ task, day: task.repeat === 'none' ? task.dueDate || anchor : anchor })
+          result.push({ task, day: task.repeat === 'none' ? taskDisplayDay(task, anchor) : anchor })
       } else if (filter.kind === 'smart' && filter.id === 'upcoming') {
         for (let i = 0; i < 7; i++) {
           const day = addDays(anchor, i)
-          if (occursOn(task, day)) result.push({ task, day })
+          if (occursOn(task, day)) {
+            result.push({ task, day })
+            if (task.repeat === 'none') break
+          }
         }
-      } else
-        result.push({
-          task,
-          day:
-            task.repeat === 'none' ? task.dueDate || today : nextOccurrence(task, today) || today,
-        })
+      } else result.push({ task, day: taskDisplayDay(task, today) })
     }
     const priority = { high: 0, medium: 1, low: 2, none: 3 }
-    return result.sort((a, b) =>
-      sort === 'priority'
-        ? priority[a.task.priority] - priority[b.task.priority] || a.day.localeCompare(b.day)
-        : sort === 'created'
-          ? b.task.createdAt.localeCompare(a.task.createdAt)
-          : a.day.localeCompare(b.day) ||
-            (a.task.timeMode === 'allday' ? '00:00' : a.task.startTime).localeCompare(
-              b.task.timeMode === 'allday' ? '00:00' : b.task.startTime,
-            ),
-    )
-  }, [filteredTasks, search, filter, anchor, today, sort])
+    function scheduledAt({ task, day }: TaskRow) {
+      const date =
+        task.repeat !== 'none'
+          ? day
+          : spansMultipleDays(task)
+            ? task.startDate
+            : task.dueDate || '9999-12-31'
+      return `${date}T${task.timeMode === 'allday' ? '00:00' : task.startTime}`
+    }
+    const manual = new Map(listSorting?.order?.map((id, index) => [id, index]))
+    return result.sort((a, b) => {
+      if (sort === 'custom') {
+        const difference =
+          (manual.get(a.task.id) ?? manual.size) - (manual.get(b.task.id) ?? manual.size)
+        if (difference) return difference
+      }
+      if (sort === 'created') return b.task.createdAt.localeCompare(a.task.createdAt)
+      if (sort === 'title') {
+        const difference = titleOrder.compare(a.task.title, b.task.title)
+        if (difference) return difference
+      }
+      if (sort === 'priority') {
+        const difference = priority[a.task.priority] - priority[b.task.priority]
+        if (difference) return difference
+      }
+      return scheduledAt(a).localeCompare(scheduledAt(b))
+    })
+  }, [filteredTasks, search, filter, anchor, today, sort, listSorting])
+  function selectSort(mode: TaskSort) {
+    change((d) => {
+      const existing = d.taskListSorting?.[sortScope]?.order
+      const order =
+        mode === 'custom' && !existing ? [...new Set(rows.map(({ task }) => task.id))] : existing
+      return { ...d, taskListSorting: { ...d.taskListSorting, [sortScope]: { mode, order } } }
+    })
+    setFiltersOpen(false)
+  }
+  function reorderTasks(source: string, target: string, side: DropSide) {
+    change((d) => {
+      const sorting = d.taskListSorting?.[sortScope]
+      if (sorting?.mode !== 'custom') return d
+      const taskIds = new Set(d.tasks.map((task) => task.id))
+      const order = [
+        ...new Set([...(sorting.order || []), ...rows.map(({ task }) => task.id)]),
+      ].filter((id) => taskIds.has(id))
+      if (!order.includes(source) || !order.includes(target)) return d
+      return {
+        ...d,
+        taskListSorting: {
+          ...d.taskListSorting,
+          [sortScope]: { mode: 'custom', order: moveOrder(order, source, target, side) },
+        },
+      }
+    })
+  }
+  function toggleTask(taskId: string, day: string) {
+    change((d) => ({
+      ...d,
+      tasks: d.tasks.map((task) => (task.id === taskId ? toggleComplete(task, day) : task)),
+    }))
+  }
   const selectedTask = data?.tasks.find((t) => t.id === selected?.id)
+  const panes = useTaskPaneWidths(detailOpen)
   const title = search.trim()
     ? '搜索结果'
     : filter.kind === 'list'
@@ -290,24 +375,49 @@ export default function App() {
             inbox: '收集箱',
             completed: '已完成',
           }[filter.id]
-  const todayRows = data?.tasks.filter((t) => occursOn(t, today)) || [],
-    doneToday = todayRows.filter((t) => isCompleted(t, today)).length
+  const showDaySummary = !searching && filter.kind === 'smart' && filter.id === 'today'
+  const dayPlan = showDaySummary ? data?.tasks.filter((task) => occursOn(task, anchor)) || [] : []
+  const dayCompleted = dayPlan.filter((task) => isCompleted(task, anchor)).length
   function saveTask(task: Task) {
     change((d) => saveTaskWithNoteTags(d, task))
-    setSelected({
-      id: task.id,
-      day:
-        task.repeat === 'none'
-          ? task.dueDate || today
-          : nextOccurrence(task, today) || task.dueDate,
-    })
+    selectTask(task.id, taskDisplayDay(task, today))
     setEditor(null)
     notify('事项已保存')
+  }
+  function saveTaskDates(task: Task, dates: TaskDates) {
+    const updated = { ...task, ...dates }
+    change((d) => ({
+      ...d,
+      tasks: d.tasks.map((item) => (item.id === task.id ? { ...item, ...dates } : item)),
+    }))
+    setSelected({
+      id: task.id,
+      day: taskDisplayDay(updated, today),
+    })
+    notify('日期已更新')
+  }
+
+  async function confirmClearModules() {
+    if (!data || !clearRequest?.length || status !== 'saved')
+      throw new Error('请等待当前数据保存完成。')
+    const next = clearModuleData(data, clearRequest)
+    const backup = await saveData(next, true)
+    savedClear.current = next
+    setData(next)
+    if (clearRequest.includes('tasks')) {
+      chooseFilter({ kind: 'smart', id: 'today' })
+      setEditor(null)
+      setEntity(null)
+    }
+    if (clearRequest.includes(module)) setModuleReset((value) => value + 1)
+    setClearBackup(backup || '')
+    setClearRequest(null)
+    notify('所选模块已清空')
   }
   function quickCreate(title: string) {
     const task = newTask(
       filter.kind === 'list' ? filter.id : 'inbox',
-      view === 'list' && filter.kind === 'smart' && filter.id === 'today' ? anchor : today,
+      filter.kind === 'smart' && filter.id === 'today' ? anchor : '',
     )
     task.title = title
     if (filter.kind === 'tag') task.tagIds = [filter.id]
@@ -324,13 +434,30 @@ export default function App() {
     )
   }
   function saveEntity(kind: EntityKind, value: Entity) {
+    if (kind === 'tag') {
+      change((d) => saveTag(d, value as Tag))
+      setEntity(null)
+      notify('已保存')
+      return
+    }
     const key = kind === 'list' ? 'lists' : kind === 'folder' ? 'folders' : 'tags'
-    change((d) => ({
-      ...d,
-      [key]: d[key].some((e) => e.id === value.id)
-        ? d[key].map((e) => (e.id === value.id ? value : e))
-        : [...d[key], value],
-    }))
+    change((d) => {
+      const editing = d[key].some((item) => item.id === value.id)
+      const folderToOpen = !editing && kind === 'list' && 'folderId' in value ? value.folderId : ''
+      return {
+        ...d,
+        folders: folderToOpen
+          ? d.folders.map((folder) =>
+              folder.id === folderToOpen && folder.collapsed
+                ? { ...folder, collapsed: false }
+                : folder,
+            )
+          : d.folders,
+        [key]: editing
+          ? d[key].map((item) => (item.id === value.id ? value : item))
+          : [...d[key], value],
+      }
+    })
     setEntity(null)
     notify('已保存')
   }
@@ -388,7 +515,7 @@ export default function App() {
       notify('无法导入：文件不是完整的 DOIT 备份。')
       return
     }
-    setPendingImport(withAssetsData(withFinanceData(withHabitData(value))))
+    setPendingImport(upgradeData(value))
   }
   async function doImport() {
     try {
@@ -412,7 +539,7 @@ export default function App() {
         notify('备份格式不正确')
         return
       }
-      setPendingImport(withAssetsData(withFinanceData(withHabitData(value))))
+      setPendingImport(upgradeData(value))
     } catch (e) {
       notify(String((e as Error).message))
     }
@@ -433,6 +560,12 @@ export default function App() {
         : addDays(anchor, view === 'week' ? step * 7 : step),
     )
   }
+  const newTaskButton = (
+    <button type="button" className="button primary" onClick={() => create(anchor)}>
+      <Icon name="Plus" size={16} />
+      新建事项
+    </button>
+  )
   return (
     <div className="app-shell">
       <header className="titlebar">
@@ -509,9 +642,11 @@ export default function App() {
             <>
               <Sidebar
                 data={data}
+                onChange={change}
+                width={panes.left}
                 filter={filter}
                 onFilter={chooseFilter}
-                onEntity={(kind, initial) => setEntity({ kind, initial })}
+                onEntity={setEntity}
                 onCollapse={(id) =>
                   change((d) => ({
                     ...d,
@@ -521,13 +656,23 @@ export default function App() {
                   }))
                 }
                 onSettings={() => setSettings(true)}
+                onManageTags={() => {
+                  setSettingsSection('tasks')
+                  setSettings(true)
+                }}
+              />
+              <TaskPaneGrip
+                side="left"
+                width={panes.left}
+                max={panes.leftMax}
+                onResize={(width) => panes.resize('left', width)}
               />
               <main className="main-panel">
                 <div className="main-topline">
                   <div className="breadcrumb">
                     <Icon name="CheckCheck" size={14} />
                     待办<span>/</span>
-                    {title}
+                    <h1 className="breadcrumb-heading">{title}</h1>
                   </div>
                   <div className="main-topline-right">
                     <span
@@ -562,117 +707,58 @@ export default function App() {
                         <kbd>Ctrl K</kbd>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={detailOpen ? '收起事项详情栏' : '展开事项详情栏'}
+                      aria-expanded={detailOpen}
+                      title={detailOpen ? '收起事项详情栏' : '展开事项详情栏'}
+                      onClick={() => setDetailOpen(!detailOpen)}
+                    >
+                      <Icon name={detailOpen ? 'PanelRightClose' : 'PanelRightOpen'} size={16} />
+                    </button>
                   </div>
                 </div>
-                <div className="main-heading">
-                  <div>
-                    <div className="eyebrow">
-                      {search
-                        ? `找到 ${rows.length} 个相关事项`
-                        : `${parseDate(today).getMonth() + 1} 月 ${parseDate(today).getDate()} 日 · 星期${weekdays[parseDate(today).getDay()]}`}
-                    </div>
-                    <h1>
-                      {title}
-                      {filter.kind === 'smart' && filter.id === 'today' && !search && (
-                        <span className="heading-sun">
-                          <Icon name="Sun" size={28} />
-                        </span>
-                      )}
-                    </h1>
-                    <p>
-                      {search
-                        ? '从想法到行动，找到那件重要的事。'
-                        : filter.kind === 'smart' && filter.id === 'today'
-                          ? '把注意力，留给今天真正重要的事。'
-                          : filter.kind === 'smart' && filter.id === 'completed'
-                            ? '那些认真做过的小事，都是生活的回响。'
-                            : '每一件事，都在这里找到自己的位置。'}
-                    </p>
-                  </div>
-                  <button className="button primary" onClick={() => create(anchor)}>
-                    <Icon name="Plus" size={16} />
-                    新建事项<kbd>N</kbd>
-                  </button>
-                </div>
-                {view === 'list' && !search && filter.kind === 'smart' && filter.id === 'today' && (
-                  <div className="day-overview">
-                    <div className="overview-copy">
-                      <span className="overview-kicker">
-                        <i /> TODAY, AT YOUR PACE
-                      </span>
-                      <h2>
-                        {doneToday === todayRows.length && todayRows.length
-                          ? '今天的计划，都有了着落。'
-                          : '小小的行动，也有大大的意义。'}
-                      </h2>
-                      <p>
-                        完成 {doneToday} / {todayRows.length} 项今日计划
-                        <span>一步一步，慢慢靠近理想的自己。</span>
-                      </p>
-                      <div className="overview-progress">
-                        <span
-                          style={{
-                            width: `${todayRows.length ? (doneToday / todayRows.length) * 100 : 0}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                    <div className="overview-art" aria-hidden="true">
-                      <svg viewBox="0 0 190 145">
-                        <path d="M55 128V58a42 42 0 0 1 84 0v70" fill="#e2ece2" />
-                        <path d="M66 128V59a31 31 0 0 1 62 0v69" fill="#f4f7ef" />
-                        <circle cx="111" cy="49" r="14" fill="#e5cf90" />
-                        <path d="M66 102c22-30 38-18 62-44v70H66" fill="#c7d8bb" />
-                        <path d="M66 111c21-12 35 5 62-10v27H66" fill="#97b39a" />
-                        <path
-                          d="M107 128c-5-20-7-27 2-45"
-                          stroke="#77947e"
-                          strokeWidth="2"
-                          fill="none"
-                        />
-                        <path
-                          d="M109 93c18-1 23-12 23-12-16-7-26 0-23 12M105 106c-15-3-20-14-20-14 16-4 22 3 20 14"
-                          fill="#77947e"
-                        />
-                        <path
-                          d="M44 129h108"
-                          stroke="#9eafa0"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                        />
-                        <path
-                          d="M143 57l3 5 6-2M34 76l4 3 4-3"
-                          stroke="#9eafa0"
-                          fill="none"
-                          strokeLinecap="round"
-                        />
-                        <circle cx="39" cy="48" r="2" fill="#cabf95" />
-                      </svg>
-                      <span>make room for life</span>
-                    </div>
+                {showDaySummary && (
+                  <div className="module-summary-row task-summary-row">
+                    <CompletionSummary
+                      label={anchor === today ? '今日完成' : `${shortDate(anchor)}完成`}
+                      completed={dayCompleted}
+                      total={dayPlan.length}
+                    />
+                    <div className="module-summary-actions">{newTaskButton}</div>
                   </div>
                 )}
                 <div className="view-toolbar">
-                  <div className="view-tabs" role="tablist" aria-label="事项视图">
-                    {(
-                      [
-                        { id: 'list', name: '列表', icon: 'List' },
-                        { id: 'week', name: '周视图', icon: 'CalendarRange' },
-                        { id: 'month', name: '月视图', icon: 'CalendarDays' },
-                      ] as const
-                    ).map((v) => (
-                      <button
-                        key={v.id}
-                        role="tab"
-                        aria-selected={view === v.id}
-                        className={view === v.id ? 'active' : ''}
-                        onClick={() => setView(v.id)}
-                      >
-                        <Icon name={v.icon} size={15} />
-                        {v.name}
-                      </button>
-                    ))}
-                  </div>
+                  {view === 'list' ? (
+                    <div className="view-tabs">
+                      <span className="list-view-label">
+                        <Icon name="List" size={15} />{' '}
+                        {searching ? `${rows.length} 项匹配` : '列表'}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="view-tabs" role="tablist" aria-label="事项视图">
+                      {(
+                        [
+                          { id: 'day', name: '日视图', icon: 'CalendarDays' },
+                          { id: 'week', name: '周视图', icon: 'CalendarRange' },
+                          { id: 'month', name: '月视图', icon: 'CalendarDays' },
+                        ] as const
+                      ).map((v) => (
+                        <button
+                          key={v.id}
+                          role="tab"
+                          aria-selected={view === v.id}
+                          className={view === v.id ? 'active' : ''}
+                          onClick={() => setCalendarView(v.id)}
+                        >
+                          <Icon name={v.icon} size={15} />
+                          {v.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="view-tools">
                     {(view !== 'list' ||
                       (filter.kind === 'smart' && ['today', 'upcoming'].includes(filter.id))) && (
@@ -725,33 +811,49 @@ export default function App() {
                               />
                               显示已完成事项
                             </label>
-                            <div className="popover-subtitle">排序方式</div>
-                            {(
-                              [
-                                { id: 'time', name: '计划时间' },
-                                { id: 'priority', name: '优先级' },
-                                { id: 'created', name: '最近创建' },
-                              ] as const
-                            ).map((s) => (
-                              <button key={s.id} onClick={() => setSort(s.id)}>
-                                {s.name}
-                                {sort === s.id && <Icon name="Check" size={14} />}
-                              </button>
-                            ))}
+                            {view === 'list' && (
+                              <>
+                                <div className="popover-subtitle">排序方式</div>
+                                {(
+                                  [
+                                    { id: 'time', name: '事项时间' },
+                                    { id: 'title', name: '标题拼音' },
+                                    { id: 'priority', name: '优先级' },
+                                    { id: 'created', name: '创建时间（最新优先）' },
+                                    { id: 'custom', name: '自定义' },
+                                  ] as const
+                                )
+                                  .filter((option) => !searching || option.id !== 'custom')
+                                  .map((option) => (
+                                    <button
+                                      key={option.id}
+                                      aria-pressed={sort === option.id}
+                                      onClick={() => selectSort(option.id)}
+                                    >
+                                      {option.name}
+                                      {sort === option.id && <Icon name="Check" size={14} />}
+                                    </button>
+                                  ))}
+                              </>
+                            )}
                           </div>
                         </>
                       )}
                     </div>
+                    {!showDaySummary && newTaskButton}
                   </div>
                 </div>
                 <div className="main-scroll">
                   {view === 'list' ? (
                     <TaskListView
+                      key={moduleReset}
                       rows={rows}
                       data={data}
                       selectedId={selected?.id || null}
                       onSelect={selectTask}
-                      onToggle={(t, day) => patchTask(toggleComplete(t, day))}
+                      onToggle={(t, day) => toggleTask(t.id, day)}
+                      onReorder={!searching && sort === 'custom' ? reorderTasks : undefined}
+                      onRename={renameTask}
                       onCreate={() => create(anchor)}
                       onQuickCreate={quickCreate}
                       showCompleted={
@@ -759,8 +861,11 @@ export default function App() {
                         (filter.kind === 'smart' && filter.id === 'completed')
                       }
                       searching={!!search}
-                      heading={
-                        filter.kind === 'smart' && filter.id === 'today' ? '今天的安排' : '待办事项'
+                      groupByList={
+                        sort !== 'custom' &&
+                        (searching ||
+                          (filter.kind !== 'list' &&
+                            !(filter.kind === 'smart' && filter.id === 'inbox')))
                       }
                     />
                   ) : (
@@ -772,7 +877,7 @@ export default function App() {
                       selectedId={selected?.id || null}
                       onSelect={selectTask}
                       onCreate={create}
-                      completedOnly={filter.kind === 'smart' && filter.id === 'completed'}
+                      onRename={renameTask}
                     />
                   )}
                 </div>
@@ -784,33 +889,57 @@ export default function App() {
                   <span>
                     {view === 'list'
                       ? `${rows.filter((r) => !isCompleted(r.task, r.day)).length} 项待完成`
-                      : '按周一至周日排列'}
+                      : view === 'day'
+                        ? '按当天安排排列'
+                        : '按周一至周日排列'}
                     <i />
                     Ctrl + N 新建
                   </span>
                 </footer>
               </main>
-              {selectedTask && selected && (
-                <TaskDetail
-                  key={selectedTask.id}
-                  task={selectedTask}
-                  day={selected.day}
-                  data={data}
-                  onClose={() => setSelected(null)}
-                  onEdit={() => setEditor(selectedTask)}
-                  onDelete={() => deleteTask(selectedTask)}
-                  onChange={patchTask}
-                  onToggle={() => patchTask(toggleComplete(selectedTask, selected.day))}
-                  onCheck={(id) => checkTask(selectedTask.id, id, selected.day)}
-                  onNotesChange={(notes, convertTags) =>
-                    changeNotes(selectedTask.id, notes, convertTags)
-                  }
-                  onChecklistEdit={(edit) => changeChecklist(selectedTask.id, edit, selected.day)}
-                />
+              {detailOpen && (
+                <>
+                  <TaskPaneGrip
+                    side="right"
+                    width={panes.right}
+                    max={panes.rightMax}
+                    onResize={(width) => panes.resize('right', width)}
+                  />
+                  {selectedTask && selected ? (
+                    <TaskDetail
+                      key={selectedTask.id}
+                      task={selectedTask}
+                      width={panes.right}
+                      day={selected.day}
+                      data={data}
+                      onClose={() => setDetailOpen(false)}
+                      onEdit={() => setEditor(selectedTask)}
+                      onDelete={() => deleteTask(selectedTask)}
+                      onChange={patchTask}
+                      onDateChange={(dates) => saveTaskDates(selectedTask, dates)}
+                      onRename={(title) => renameTask(selectedTask.id, title)}
+                      onToggle={() => toggleTask(selectedTask.id, selected.day)}
+                      onCheck={(id) => checkTask(selectedTask.id, id, selected.day)}
+                      onNotesChange={(notes, convertTags) =>
+                        changeNotes(selectedTask.id, notes, convertTags)
+                      }
+                      onChecklistEdit={(edit) =>
+                        changeChecklist(selectedTask.id, edit, selected.day)
+                      }
+                    />
+                  ) : (
+                    <aside
+                      className="detail-panel detail-empty"
+                      aria-label="事项详情"
+                      style={{ width: panes.right }}
+                    />
+                  )}
+                </>
               )}
             </>
           ) : module === 'habits' ? (
             <HabitBoard
+              key={moduleReset}
               data={data}
               today={today}
               status={status}
@@ -821,6 +950,7 @@ export default function App() {
             />
           ) : module === 'finance' ? (
             <FinanceBoard
+              key={moduleReset}
               data={data}
               today={today}
               status={status}
@@ -831,6 +961,7 @@ export default function App() {
             />
           ) : (
             <AssetBoard
+              key={moduleReset}
               data={data}
               today={today}
               status={status}
@@ -847,15 +978,14 @@ export default function App() {
       )}
       {data && entity && (
         <EntityEditor
-          kind={entity.kind}
-          initial={entity.initial}
+          {...entity}
           data={data}
           onSave={saveEntity}
           onDelete={requestDeleteEntity}
           onClose={closeEntity}
         />
       )}
-      {settings && data && !pendingImport && (
+      {settings && data && !pendingImport && !clearRequest && (
         <SettingsDialog
           data={data}
           path={path}
@@ -866,7 +996,28 @@ export default function App() {
           }
           onExport={doExport}
           onImport={doImport}
+          clearBackup={clearBackup}
+          onRequestClear={(selectedModules) => {
+            setSettingsSection('data')
+            setClearRequest(selectedModules)
+          }}
           onClose={closeSettings}
+          initialSection={settingsSection}
+          onChange={change}
+          onViewTag={(id) => {
+            chooseFilter({ kind: 'tag', id })
+            setSettings(false)
+          }}
+        />
+      )}
+      {clearRequest && (
+        <ClearModulesDialog
+          names={modules
+            .filter(({ id }) => clearRequest.includes(id))
+            .map(({ name }) => name)
+            .join('、')}
+          onClear={confirmClearModules}
+          onClose={() => setClearRequest(null)}
         />
       )}
       {confirm && (
@@ -965,7 +1116,7 @@ export default function App() {
           }
         }}
       />
-      {toast && (
+      {toast && !clearRequest && (
         <div className="toast" role="status">
           <span className="toast-icon">
             <Icon name="Check" size={14} />

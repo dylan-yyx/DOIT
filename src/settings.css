@@ -251,6 +251,13 @@
   font-size: 10px;
   color: var(--theme-muted);
 }
+.data-overview small {
+  padding: 0 6px;
+  color: var(--theme-muted);
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.5;
+}
 .settings-card {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -318,6 +325,58 @@
   font-size: 10px;
   line-height: 1.9;
   color: var(--theme-muted);
+}
+.clear-data-card {
+  padding: 0 16px;
+}
+.clear-data-card fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.clear-data-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.clear-data-option input {
+  margin: 2px 0;
+}
+.clear-data-option strong {
+  display: block;
+  color: var(--theme-text);
+  font-size: 12px;
+}
+.clear-data-option small,
+.clear-data-note {
+  display: block;
+  color: var(--theme-muted);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.clear-data-option small {
+  margin-top: 4px;
+}
+.clear-data-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 0;
+}
+.clear-backup-location {
+  padding-bottom: 12px;
+}
+.clear-backup-location code {
+  display: block;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 @media (max-width: 1150px) {
   .settings-modal {

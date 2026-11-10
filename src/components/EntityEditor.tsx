@@ -1,19 +1,21 @@
 import { useState } from 'react'
 import type { AppData, Folder, TaskList, Tag } from '../core/types'
 import Modal from './Modal'
-import Icon, { colors, editableIcons } from './Icon'
+import Icon, { colors } from './Icon'
+import { ColorPicker, IconPicker } from './StylePicker'
+import { tagNameKey } from '../modules/tasks/notes'
 export type EntityKind = 'list' | 'folder' | 'tag'
 export type Entity = TaskList | Folder | Tag
+export type EntityDraft = { kind: EntityKind; initial?: Entity; folderId?: string }
 export default function EntityEditor({
   kind: initialKind,
   initial,
+  folderId: initialFolderId,
   data,
   onSave,
   onDelete,
   onClose,
-}: {
-  kind: EntityKind
-  initial?: Entity
+}: EntityDraft & {
   data: AppData
   onSave: (kind: EntityKind, value: Entity) => void
   onDelete: (kind: EntityKind, value: Entity) => void
@@ -21,21 +23,42 @@ export default function EntityEditor({
 }) {
   const [kind, setKind] = useState(initialKind),
     [name, setName] = useState(initial?.name || ''),
-    [icon, setIcon] = useState(initial && 'icon' in initial ? initial.icon : 'List'),
+    [icon, setIcon] = useState(initial && 'icon' in initial ? initial.icon : ''),
     [color, setColor] = useState(initial?.color || colors[0]),
     [folderId, setFolderId] = useState(
-      initial && 'folderId' in initial ? initial.folderId || '' : '',
+      initial && 'folderId' in initial ? initial.folderId || '' : initialFolderId || '',
     )
+  const [groupId, setGroupId] = useState(
+    initial && 'groupId' in initial ? initial.groupId || '' : '',
+  )
+  const [pinned, setPinned] = useState(
+    initial && 'pinned' in initial
+      ? !!initial.pinned
+      : data.tags.filter((t) => t.pinned).length < 6,
+  )
+  const [error, setError] = useState('')
   const label = kind === 'list' ? '清单' : kind === 'folder' ? '文件夹' : '标签'
+  const selectedIcon = icon || (kind === 'folder' ? 'Folder' : 'List')
   function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
+    if (
+      kind === 'tag' &&
+      data.tags.some((t) => t.id !== initial?.id && tagNameKey(t.name) === tagNameKey(name.trim()))
+    ) {
+      setError('已有同名标签，请直接使用或编辑现有标签。')
+      return
+    }
     const value = {
       id: initial?.id || crypto.randomUUID(),
       name: name.trim(),
       color,
-      ...(kind !== 'tag' ? { icon } : {}),
+      ...(kind !== 'tag' ? { icon: selectedIcon } : {}),
+      ...(kind === 'folder' && initial && 'collapsed' in initial
+        ? { collapsed: initial.collapsed }
+        : {}),
       ...(kind === 'list' && folderId ? { folderId } : {}),
+      ...(kind === 'tag' ? { groupId, pinned } : {}),
     }
     onSave(kind, value)
   }
@@ -48,7 +71,7 @@ export default function EntityEditor({
       onClose={onClose}
     >
       <form onSubmit={submit} className="task-form">
-        {!initial && (
+        {!initial && !initialFolderId && (
           <div className="kind-picker">
             {(['list', 'folder', 'tag'] as const).map((k) => (
               <button
@@ -63,8 +86,8 @@ export default function EntityEditor({
             ))}
           </div>
         )}
-        <div className="entity-preview" style={{ color, background: `${color}10` }}>
-          <Icon name={kind === 'tag' ? 'Hash' : icon} size={28} />
+        <div className="entity-preview" style={{ background: `${color}10` }}>
+          <Icon name={kind === 'tag' ? 'Hash' : selectedIcon} size={28} style={{ color }} />
           <span>{name || label + '名称'}</span>
         </div>
         <label>
@@ -91,41 +114,41 @@ export default function EntityEditor({
             </select>
           </label>
         )}
-        <div>
-          <div className="field-label">颜色</div>
-          <div className="color-picker">
-            {colors.map((c) => (
-              <button
-                type="button"
-                key={c}
-                style={{ background: c }}
-                className={c === color ? 'selected' : ''}
-                aria-label={`颜色 ${c}`}
-                onClick={() => setColor(c)}
+        <ColorPicker value={color} onChange={setColor} />
+        {kind === 'tag' && (
+          <>
+            <label>
+              所属分组
+              <select
+                aria-label="所属分组"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
               >
-                {c === color && <Icon name="Check" size={15} />}
-              </button>
-            ))}
-          </div>
-        </div>
+                <option value="">未分组</option>
+                {data.tagGroups?.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="tag-checkbox">
+              <input
+                type="checkbox"
+                checked={pinned}
+                onChange={(e) => setPinned(e.target.checked)}
+              />
+              固定到左侧栏
+            </label>
+          </>
+        )}
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
         {kind !== 'tag' && (
-          <div>
-            <div className="field-label">图标</div>
-            <div className="icon-picker">
-              {editableIcons.map((i) => (
-                <button
-                  type="button"
-                  key={i}
-                  className={i === icon ? 'selected' : ''}
-                  aria-label={`图标 ${i}`}
-                  onClick={() => setIcon(i)}
-                  style={i === icon ? { color, background: `${color}15` } : undefined}
-                >
-                  <Icon name={i} size={21} />
-                </button>
-              ))}
-            </div>
-          </div>
+          <IconPicker kind={kind} value={selectedIcon} color={color} onChange={setIcon} />
         )}
         <div className="modal-footer">
           {initial && initial.id !== 'inbox' && (

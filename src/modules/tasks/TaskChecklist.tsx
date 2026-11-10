@@ -20,8 +20,8 @@ export default function TaskChecklist({
   const [adding, setAdding] = useState(false),
     [draft, setDraft] = useState('')
   const draftRef = useRef(''),
-    input = useRef<HTMLInputElement>(null)
-  const itemInputs = useRef(new Map<string, HTMLInputElement | null>())
+    input = useRef<HTMLTextAreaElement>(null)
+  const itemInputs = useRef(new Map<string, HTMLTextAreaElement | null>())
   const checks = checksFor(task, day)
   useEffect(() => {
     if (request) setAdding(true)
@@ -71,7 +71,8 @@ export default function TaskChecklist({
           >
             {checks.includes(item.id) && <Icon name="Check" size={12} />}
           </button>
-          <input
+          <textarea
+            rows={1}
             ref={(element) => {
               itemInputs.current.set(item.id, element)
             }}
@@ -80,7 +81,13 @@ export default function TaskChecklist({
             value={item.title}
             placeholder="输入检查事项"
             maxLength={200}
-            onChange={(event) => onEdit({ type: 'rename', id: item.id, title: event.target.value })}
+            onChange={(event) =>
+              onEdit({
+                type: 'rename',
+                id: item.id,
+                title: event.target.value.replace(/[\r\n]+/g, ' '),
+              })
+            }
             onBlur={(event) => {
               const title = event.currentTarget.value.trim()
               if (!title) onEdit({ type: 'remove', id: item.id })
@@ -114,7 +121,8 @@ export default function TaskChecklist({
       {adding ? (
         <div className="detail-check check-composer">
           <span className="square-check" />
-          <input
+          <textarea
+            rows={1}
             ref={input}
             className="detail-check-title"
             aria-label="新增检查事项"
@@ -122,8 +130,8 @@ export default function TaskChecklist({
             value={draft}
             maxLength={200}
             onChange={(event) => {
-              draftRef.current = event.target.value
-              setDraft(event.target.value)
+              draftRef.current = event.target.value.replace(/[\r\n]+/g, ' ')
+              setDraft(draftRef.current)
             }}
             onBlur={() => commit(false)}
             onKeyDown={(event) => {

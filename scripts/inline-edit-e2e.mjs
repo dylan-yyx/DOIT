@@ -2,9 +2,11 @@ import { _electron as electron, expect } from '@playwright/test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { writeLegacyFixture } from './test-fixtures.mjs'
 
 const env = { ...process.env, DOIT_DATA_DIR: path.resolve(`.test-data/inline-${Date.now()}`) }
 delete env.ELECTRON_RUN_AS_NODE
+await writeLegacyFixture(env.DOIT_DATA_DIR)
 const errors = []
 let app, page
 async function launch() {
@@ -21,7 +23,7 @@ async function launch() {
   await expect.poll(async () => !!(await page.evaluate(() => window.desktop.load()))).toBe(true)
 }
 const read = () => page.evaluate(() => window.desktop.load())
-const detail = () => page.getByLabel('事项详情')
+const detail = () => page.getByRole('complementary', { name: '事项详情', exact: true })
 
 try {
   await launch()
@@ -50,7 +52,7 @@ try {
   await notes.click()
   await expect(notes).toBeFocused()
   await notes.fill('直接点空白就可以写。\n第二行也会保留。 #随手记')
-  await detail().locator('.detail-title-row h2').click()
+  await detail().locator('.detail-type').click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(notes).toHaveValue('直接点空白就可以写。\n第二行也会保留。')
   await expect
@@ -133,7 +135,7 @@ try {
   await page.screenshot({ path: 'test-results/07-inline-edit.png' })
   await app.close()
   await launch()
-  await page.locator(`.task-row[data-task-id="${id}"]`).click()
+  await page.locator(`.task-row[data-task-id="${id}"] .task-row-more`).click()
   await expect(detail().getByRole('textbox', { name: '备注', exact: true })).toHaveValue(
     '备注与检查事项同时保留。',
   )

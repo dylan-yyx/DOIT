@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import type {
-  FinanceAccount,
-  FinanceCategory,
-  FinanceData,
-  FinanceEntry,
-  Reimbursement,
-} from '../../core/types'
+import type { FinanceAccount, FinanceCategory, FinanceData } from '../../core/types'
 import { dateKey } from '../../core/dates'
 import Modal from '../../components/Modal'
 import Icon, { colors, editableIcons } from '../../components/Icon'
-import { accountBalance, money, moneyInput, parseMoney, pendingReimbursement } from './logic'
+import {
+  accountBalance,
+  money,
+  moneyInput,
+  parseMoney,
+  INVESTMENT_CATEGORY,
+  RECONCILIATION_CATEGORY,
+} from './logic'
 
 export function AccountManager({
   finance,
@@ -41,9 +42,15 @@ export function AccountManager({
     const balance = parseMoney(opening)
     if (!account.name.trim() || balance === null)
       return setError('请填写账户名称和有效余额（最多两位小数）。')
-    if (finance.accounts.some((a) => a.id !== account.id && a.name === account.name.trim()))
-      return setError('已有同名账户，请换一个名称。')
-    onSave({ ...account, name: account.name.trim(), openingBalance: balance })
+    const name = account.name.trim()
+    const note = account.note?.trim() || ''
+    if (
+      finance.accounts.some(
+        (a) => a.id !== account.id && a.name === name && (a.note?.trim() || '') === note,
+      )
+    )
+      return setError('已有同名且备注相同的账户，请用不同的备注区分。')
+    onSave({ ...account, name, note: note || undefined, openingBalance: balance })
     setAccount(fresh())
     setOpening('0.00')
     setError('')
@@ -61,7 +68,10 @@ export function AccountManager({
               <Icon name={a.icon} size={18} />
             </i>
             <span>
-              {a.name}
+              <span className="finance-account-label">
+                {a.name}
+                {a.note && <small title={a.note}>{a.note}</small>}
+              </span>
               <small>初始 ¥{money(a.openingBalance)}</small>
             </span>
             <strong>¥{money(accountBalance(finance, a.id, dateKey()))}</strong>
@@ -111,8 +121,18 @@ export function AccountManager({
             />
           </label>
         </div>
+        <label>
+          账户备注（选填）
+          <input
+            aria-label="账户备注"
+            maxLength={30}
+            value={account.note || ''}
+            placeholder="比如：卡号后四位、支付宝昵称"
+            onChange={(e) => setAccount({ ...account, note: e.target.value })}
+          />
+        </label>
         <p className="finance-hint">
-          初始余额指开始记账前的余额。日后的零星变化请用“对账调整”记录。
+          初始余额指开始记账前的余额。零星收益可记为收入中的「对账调整」。
         </p>
         <ColorPicker
           value={account.color}
@@ -217,6 +237,9 @@ export function CategoryManager({
             maxLength={16}
             placeholder="比如：宠物、旅行"
             value={category.name}
+            readOnly={
+              category.id === INVESTMENT_CATEGORY || category.id === RECONCILIATION_CATEGORY
+            }
             onChange={(e) => setCategory({ ...category, name: e.target.value })}
           />
         </label>
@@ -270,114 +293,5 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (color: str
         </button>
       ))}
     </div>
-  )
-}
-export function ReimbursementEditor({
-  entry,
-  finance,
-  onSave,
-  onClose,
-}: {
-  entry: FinanceEntry
-  finance: FinanceData
-  onSave: (r: Reimbursement) => void
-  onClose: () => void
-}) {
-  const pending = pendingReimbursement(entry)
-  const [amount, setAmount] = useState(moneyInput(pending))
-  const [account, setAccount] = useState(entry.accountId)
-  const [date, setDate] = useState(dateKey())
-  const [note, setNote] = useState('')
-  const [error, setError] = useState('')
-  return (
-    <Modal
-      title="记 AA 回款"
-      subtitle={`${entry.title} · 还可收回 ¥${money(pending)}`}
-      onClose={onClose}
-    >
-      <form
-        className="finance-form"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const cents = parseMoney(amount)
-          if (cents === null || cents <= 0 || cents > pending)
-            return setError('回款金额应大于 0，且不能超过待收金额。')
-          if (!date || date < entry.date || date > dateKey())
-            return setError('回款日期应在付款日期和今天之间。')
-          onSave({
-            id: crypto.randomUUID(),
-            amount: cents,
-            accountId: account,
-            date,
-            note: note.trim(),
-          })
-        }}
-      >
-        <div className="finance-callout">
-          <Icon name="Users" size={19} />
-          <p>可分多次收回，也可收到其他账户。回款只增加账户余额，不计为收入。</p>
-        </div>
-        <label>
-          回款金额（元）
-          <input
-            aria-label="回款金额（元）"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-        </label>
-        <div className="finance-form-row">
-          <label>
-            收款账户
-            <select
-              aria-label="收款账户"
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-            >
-              {finance.accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            回款日期
-            <input
-              aria-label="回款日期"
-              type="date"
-              required
-              min={entry.date}
-              max={dateKey()}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </label>
-        </div>
-        <label>
-          回款备注
-          <input
-            aria-label="回款备注"
-            maxLength={120}
-            placeholder="比如：小王还款"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
-        {error && (
-          <p className="error-text" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="modal-footer">
-          <button className="button secondary" type="button" onClick={onClose}>
-            取消
-          </button>
-          <button className="button primary" type="submit">
-            保存回款
-          </button>
-        </div>
-      </form>
-    </Modal>
   )
 }

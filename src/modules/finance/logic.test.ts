@@ -9,11 +9,11 @@ import {
   ledgerEvents,
   newFinanceEntry,
   parseMoney,
-  pendingReimbursement,
   personalExpense,
   reimbursed,
   validateFinanceData,
   withFinanceData,
+  RECONCILIATION_CATEGORY,
 } from './logic'
 
 function expense(patch: Partial<FinanceEntry> = {}): FinanceEntry {
@@ -49,29 +49,60 @@ describe('金额与基础收支', () => {
         amount: 1000000,
       }),
     ]
-    expect(financeSummary(entries)).toEqual({ income: 1000000, expense: 2000, adjustment: 0 })
+    expect(financeSummary(ledgerEvents(entries))).toEqual({
+      income: 1000000,
+      expense: 2000,
+      investment: 0,
+      net: 998000,
+    })
     expect(accountBalance(book(entries), 'alipay')).toBe(1098000)
     expect(validateFinanceData(book(entries))).toBe(true)
   })
-  it('对账调整支持正负，不改变收入和消费', () => {
+  it('把旧的正负对账差额转入收入，账户余额保持一致', () => {
     const f = book([
       expense({ type: 'adjustment', categoryId: '', amount: 57 }),
       expense({ id: 'negative', type: 'adjustment', categoryId: '', amount: -12 }),
     ])
-    expect(financeSummary(f.entries)).toEqual({ income: 0, expense: 0, adjustment: 45 })
+    delete f.categoryVersion
+    expect(validateFinanceData(f)).toBe(true)
+    const next = withFinanceData({ ...createSeed(), finance: f }).finance!
+    expect(
+      next.entries.every((e) => e.type === 'income' && e.categoryId === RECONCILIATION_CATEGORY),
+    ).toBe(true)
+    expect(financeSummary(ledgerEvents(next.entries))).toEqual({
+      income: 45,
+      expense: 0,
+      investment: 0,
+      net: 45,
+    })
+    expect(validateFinanceData(next)).toBe(true)
+    expect(accountBalance(next, 'alipay')).toBe(accountBalance(f, 'alipay'))
     expect(accountBalance(f, 'alipay')).toBe(100045)
     expect(accountBalance(f, 'alipay', '2026-11-07')).toBe(100000)
-    expect(accountBalance(f, 'alipay', '2026-11-08', f.entries[0].id)).toBe(99988)
+  })
+  it('投资支出扣减付款账户余额，消费支出与结余按日常支出计算', () => {
+    const f = book([
+      expense({ id: 'meal', amount: 2000 }),
+      expense({ id: 'invest', amount: 100000, categoryId: 'investment' }),
+      expense({ id: 'salary', amount: 1000000, categoryId: 'salary', type: 'income' }),
+      expense({ id: 'gain', amount: 235, categoryId: RECONCILIATION_CATEGORY, type: 'income' }),
+    ])
+    expect(financeSummary(ledgerEvents(f.entries))).toEqual({
+      income: 1000235,
+      expense: 2000,
+      investment: 100000,
+      net: 998235,
+    })
+    expect(accountBalance(f, 'alipay')).toBe(998235)
   })
 })
 describe('AA 消费、现金与跨月回款', () => {
   const aa = () => expense({ split: { people: 4, personalAmount: 10000, reimbursements: [] } })
-  it('代付400消费只计100；未收款时余额先扣400，产生应收300', () => {
+  it('历史代付 400 的消费仍为 100，账户余额按实际付款计算', () => {
     const e = aa()
     expect(personalExpense(e)).toBe(10000)
-    expect(pendingReimbursement(e)).toBe(30000)
     expect(accountBalance(book([e]), 'alipay')).toBe(60000)
-    expect(financeSummary([e]).expense).toBe(10000)
+    expect(financeSummary(ledgerEvents([e]))).toMatchObject({ expense: 10000 })
   })
   it('支持部分回款、跨账户收款；回款不增加收入', () => {
     const e = aa()
@@ -84,10 +115,12 @@ describe('AA 消费、现金与跨月回款', () => {
     })
     const f = book([e])
     expect(reimbursed(e)).toBe(10000)
-    expect(pendingReimbursement(e)).toBe(20000)
     expect(accountBalance(f, 'alipay')).toBe(60000)
     expect(accountBalance(f, 'wechat')).toBe(10000)
-    expect(financeSummary([e])).toEqual({ expense: 10000, income: 0, adjustment: 0 })
+    expect(financeSummary(ledgerEvents([e]))).toMatchObject({
+      expense: 10000,
+      income: 0,
+    })
   })
   it('回款全部收齐后，净现金支出与个人承担一致', () => {
     const e = aa()
@@ -98,7 +131,6 @@ describe('AA 消费、现金与跨月回款', () => {
       amount: 30000,
       note: '',
     })
-    expect(pendingReimbursement(e)).toBe(0)
     expect(accountBalance(book([e]), 'alipay')).toBe(90000)
   })
   it('跨月回款按到账日展示，不在新月份重复计入收入和支出', () => {
@@ -114,18 +146,34 @@ describe('AA 消费、现金与跨月回款', () => {
     const events = ledgerEvents([e])
     expect(events.map((event) => event.date)).toEqual(['2026-11-08', '2026-10-31'])
     expect(
-      financeSummary(
-        events
-          .filter((event) => event.date.startsWith('2026-11') && !event.receipt)
-          .map((event) => event.entry),
-      ),
-    ).toEqual({ income: 0, expense: 0, adjustment: 0 })
+      financeSummary(events.filter((event) => event.date.startsWith('2026-11'))),
+    ).toMatchObject({ income: 0, expense: 0 })
     expect(accountBalance(book([e]), 'wechat', '2026-10-31')).toBe(0)
     expect(accountBalance(book([e]), 'wechat', '2026-11-08')).toBe(10000)
-    expect(pendingReimbursement(e, '2026-10-31')).toBe(30000)
   })
 })
 describe('旧数据迁移与备份校验', () => {
+  it('补齐分类并迁移旧投资记录，同时保留自定义名称、账目关联和旧收入分类', () => {
+    const old = book([
+      expense({ id: 'old-invest', categoryId: 'my-invest' }),
+      expense({ id: 'old-custom', categoryId: 'home' }),
+      expense({ id: 'old-income', type: 'income', categoryId: 'other-income' }),
+    ])
+    delete old.categoryVersion
+    old.categories = old.categories.filter((c) => c.id !== 'investment')
+    old.categories.find((c) => c.id === 'home')!.name = '房贷'
+    old.categories.push(
+      { id: 'my-invest', name: '投资', type: 'expense', icon: 'Wallet', color: '#123456' },
+      { id: 'other-income', name: '其他收入', type: 'income', icon: 'Wallet', color: '#654321' },
+    )
+    const next = withFinanceData({ ...createSeed(), finance: old }).finance!
+    expect(next.categories.find((c) => c.id === 'home')?.name).toBe('住房')
+    expect(next.categories.find((c) => c.id === next.entries[1].categoryId)?.name).toBe('房贷')
+    expect(next.categories.find((c) => c.id === 'investment')?.color).toBe('#123456')
+    expect(next.entries[0].categoryId).toBe('investment')
+    expect(next.entries[2].categoryId).toBe('other-income')
+    expect(validateFinanceData(next)).toBe(true)
+  })
   it('只初始化空账本，保留已有待办和习惯，重复迁移不新增数据', () => {
     const old = createSeed()
     delete old.finance

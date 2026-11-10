@@ -4,6 +4,7 @@ import { validateHabitData } from '../habits/logic'
 import { validateFinanceData } from '../finance/logic'
 import { validateAssetsData } from '../assets/logic'
 import { validateAppearance } from '../../core/appearance'
+import { validateTagData } from './tags'
 export const repeatNames: Record<Repeat, string> = {
   none: '不重复',
   daily: '每天',
@@ -14,10 +15,65 @@ export const repeatNames: Record<Repeat, string> = {
   yearly: '每年',
   custom: '自定义星期',
 }
+export type TaskDates = Pick<
+  Task,
+  'dateMode' | 'startDate' | 'dueDate' | 'repeatUntil' | 'timeMode' | 'startTime' | 'endTime'
+>
+
+export function spansMultipleDays(task: Pick<Task, 'kind' | 'dateMode' | 'startDate' | 'dueDate'>) {
+  return (
+    (task.kind === 'progress' || task.dateMode === 'range') &&
+    Boolean(task.startDate && task.dueDate && task.startDate < task.dueDate)
+  )
+}
+
+export function taskDateDraft(task: Task): TaskDates {
+  const { startDate, dueDate, repeatUntil, timeMode } = task
+  const startTime = task.startTime || '09:00'
+  const endTime = task.endTime || '10:00'
+  if (task.kind === 'progress')
+    return { startDate, dueDate, repeatUntil, timeMode, startTime, endTime }
+  const date = task.repeat === 'none' ? dueDate : startDate || dueDate
+  const dateMode = task.dateMode ?? (timeMode === 'range' && date ? 'range' : 'single')
+  return {
+    dateMode,
+    startDate: task.dateMode === 'range' ? startDate : date,
+    dueDate: task.dateMode === 'range' ? dueDate : date,
+    repeatUntil,
+    timeMode: date ? timeMode : 'allday',
+    startTime,
+    endTime,
+  }
+}
+
+export function taskDateError(task: TaskDates & Pick<Task, 'kind' | 'repeat'>) {
+  const { startDate, dueDate, repeatUntil } = task
+  if (
+    [startDate, dueDate, repeatUntil].some(
+      (date) => date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || dateKey(parseDate(date)) !== date),
+    )
+  )
+    return '请输入有效日期。'
+  if (startDate && dueDate && startDate > dueDate) return '结束日期不能早于开始日期。'
+  if ((task.kind === 'progress' || task.dateMode === 'range') && (!startDate || !dueDate))
+    return '请填写完整的起止日期。'
+  if (task.repeat !== 'none') {
+    if (!dueDate) return '重复事项需要设置开始日期。'
+    if (task.kind === 'normal' && spansMultipleDays(task)) return '跨日事项需设为不重复。'
+    if (repeatUntil && repeatUntil < (startDate || dueDate)) return '重复截止日期不能早于开始日期。'
+  }
+  if (
+    task.timeMode === 'range' &&
+    task.endTime <= task.startTime &&
+    !(task.kind === 'normal' && spansMultipleDays(task))
+  )
+    return '结束时间需晚于开始时间。'
+  return ''
+}
 export function occursOn(task: Task, day: string): boolean {
   if (task.repeat === 'none') {
     if (!task.dueDate) return false
-    return task.kind === 'progress'
+    return task.kind === 'progress' || task.dateMode === 'range'
       ? day >= (task.startDate || task.dueDate) && day <= task.dueDate
       : day === task.dueDate
   }
@@ -128,10 +184,23 @@ export function nextOccurrence(task: Task, from: string): string | null {
   const begin = anchor && anchor > from ? anchor : from
   for (let i = 0; i < 370; i++) {
     const day = addDays(begin, i)
+    if (task.repeatUntil && day > task.repeatUntil) break
     if (occursOn(task, day)) return day
   }
   return null
 }
+export function taskDisplayDay(task: Task, from: string): string {
+  if (task.repeat !== 'none') {
+    const anchor = task.startDate || task.dueDate
+    return nextOccurrence(task, from) || (anchor && nextOccurrence(task, anchor)) || anchor || from
+  }
+  if (spansMultipleDays(task)) {
+    if (from < task.startDate) return task.startDate
+    return from > task.dueDate ? task.dueDate : from
+  }
+  return task.dueDate || from
+}
+
 export function newTask(listId = 'inbox', day = dateKey()): Task {
   return {
     id: crypto.randomUUID(),
@@ -194,6 +263,12 @@ export function validateData(value: unknown): value is AppData {
     )
       return false
     if (!d.tags.every((t) => t && str(t.id) && str(t.name) && str(t.color))) return false
+    if (!validateTagData(d)) return false
+    if (
+      d.preferences.exampleCleanupDone !== undefined &&
+      typeof d.preferences.exampleCleanupDone !== 'boolean'
+    )
+      return false
     if (
       [d.tasks, d.lists, d.folders, d.tags].some(
         (a) => new Set(a.map((x) => x.id)).size !== a.length,
@@ -204,6 +279,21 @@ export function validateData(value: unknown): value is AppData {
     if (!validateFinanceData(d.finance)) return false
     if (!validateAssetsData(d.assets)) return false
     if (!validateAppearance(d.preferences.appearance)) return false
+    const stringList = (v: unknown) => Array.isArray(v) && v.every(str)
+    if (d.taskSidebarOrder !== undefined && !stringList(d.taskSidebarOrder)) return false
+    if (
+      d.taskListSorting !== undefined &&
+      (!d.taskListSorting ||
+        typeof d.taskListSorting !== 'object' ||
+        Array.isArray(d.taskListSorting) ||
+        !Object.values(d.taskListSorting).every(
+          (sort) =>
+            sort &&
+            ['time', 'title', 'priority', 'created', 'custom'].includes(sort.mode) &&
+            (sort.order === undefined || stringList(sort.order)),
+        ))
+    )
+      return false
     return d.tasks.every((t) => {
       if (
         !t ||
@@ -223,11 +313,24 @@ export function validateData(value: unknown): value is AppData {
       )
         return false
       if (t.startDate && t.dueDate && t.startDate > t.dueDate) return false
+      if (t.dateMode !== undefined && t.dateMode !== 'single' && t.dateMode !== 'range')
+        return false
+      if (
+        t.kind === 'normal' &&
+        t.dateMode === 'range' &&
+        (!t.startDate ||
+          !t.dueDate ||
+          t.timeMode === 'point' ||
+          (t.repeat !== 'none' && spansMultipleDays(t)))
+      )
+        return false
       if (
         !['allday', 'point', 'range'].includes(t.timeMode) ||
         !time(t.startTime) ||
         !time(t.endTime) ||
-        (t.timeMode === 'range' && t.endTime <= t.startTime)
+        (t.timeMode === 'range' &&
+          t.endTime <= t.startTime &&
+          !(t.kind === 'normal' && spansMultipleDays(t)))
       )
         return false
       if (

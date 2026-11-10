@@ -5,6 +5,8 @@ import Modal from './Modal'
 import Icon from './Icon'
 import AppearanceSettings from './AppearanceSettings'
 import DataSettings from './DataSettings'
+import TagManager from './TagManager'
+import type { ModuleId } from '../modules/registry'
 
 // Add a navigation entry and its corresponding panel to extend the settings.
 const sections = [
@@ -15,13 +17,19 @@ const sections = [
     description: '选择喜欢的背景与字体，让工作台更像你。',
   },
   {
+    id: 'tasks',
+    label: '待办设置',
+    icon: 'Tags',
+    description: '整理标签分组，选择左侧栏里常用的标签。',
+  },
+  {
     id: 'data',
     label: '数据管理',
     icon: 'Database',
     description: '管理本地记录，备份与恢复你的生活数据。',
   },
 ] as const
-type SectionId = (typeof sections)[number]['id']
+export type SettingsSectionId = (typeof sections)[number]['id']
 
 export default function SettingsDialog({
   data,
@@ -32,6 +40,11 @@ export default function SettingsDialog({
   onExport,
   onImport,
   onClose,
+  initialSection = 'appearance',
+  onChange,
+  onViewTag,
+  onRequestClear,
+  clearBackup,
 }: {
   data: AppData
   path: string
@@ -41,14 +54,20 @@ export default function SettingsDialog({
   onExport: () => void
   onImport: () => void
   onClose: () => void
+  initialSection?: SettingsSectionId
+  onChange: (fn: (data: AppData) => AppData) => void
+  onViewTag: (id: string) => void
+  onRequestClear: (selected: ModuleId[]) => void
+  clearBackup: string
 }) {
-  const [active, setActive] = useState<SectionId>('appearance')
+  const [active, setActive] = useState<SettingsSectionId>(initialSection)
   const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const section = sections.find((item) => item.id === active)!
-  const panels: Record<SectionId, ReactNode> = {
+  const panels: Record<SettingsSectionId, ReactNode> = {
     appearance: (
       <AppearanceSettings value={data.preferences.appearance} onChange={onAppearanceChange} />
     ),
+    tasks: <TagManager data={data} onChange={onChange} onViewTag={onViewTag} />,
     data: (
       <DataSettings
         data={data}
@@ -57,6 +76,8 @@ export default function SettingsDialog({
         saveError={saveError}
         onExport={onExport}
         onImport={onImport}
+        onRequestClear={onRequestClear}
+        clearBackup={clearBackup}
       />
     ),
   }

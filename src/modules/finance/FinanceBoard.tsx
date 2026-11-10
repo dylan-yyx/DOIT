@@ -10,23 +10,24 @@ import {
   weekdays,
 } from '../../core/dates'
 import Icon from '../../components/Icon'
+import WorkspaceName from '../../components/WorkspaceName'
 import Modal from '../../components/Modal'
 import FinanceEditor from './FinanceEditor'
-import { AccountManager, CategoryManager, ReimbursementEditor } from './FinanceManagers'
+import { AccountManager, CategoryManager } from './FinanceManagers'
 import {
   accountBalance,
+  accountLabel,
+  INVESTMENT_CATEGORY,
   financeSummary,
   ledgerEvents,
   money,
   newFinanceEntry,
-  pendingReimbursement,
   personalExpense,
-  reimbursed,
   type LedgerEvent,
 } from './logic'
 import './finance.css'
 
-type Filter = 'all' | 'expense' | 'income' | 'aa' | 'adjustment'
+type Filter = 'all' | 'expense' | 'income'
 type Props = {
   data: AppData
   today: string
@@ -56,7 +57,6 @@ export default function FinanceBoard({
   const [editor, setEditor] = useState<{ entry: FinanceEntry; editing: boolean } | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [manager, setManager] = useState<'accounts' | 'categories' | null>(null)
-  const [receiptFor, setReceiptFor] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{
     title: string
     message: string
@@ -64,7 +64,10 @@ export default function FinanceBoard({
   } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const detail = finance.entries.find((e) => e.id === detailId)
-  const receiptEntry = finance.entries.find((e) => e.id === receiptFor)
+  const labelForAccount = (id: string) => {
+    const value = finance.accounts.find((a) => a.id === id)
+    return value ? accountLabel(value) : ''
+  }
   function change(fn: (f: FinanceData) => FinanceData) {
     onChange((d) => ({ ...d, finance: fn(d.finance!) }))
   }
@@ -75,11 +78,6 @@ export default function FinanceBoard({
       entry.type = 'income'
       entry.categoryId = finance.categories.find((c) => c.type === 'income')?.id || ''
     }
-    if (filter === 'adjustment') {
-      entry.type = 'adjustment'
-      entry.categoryId = ''
-    }
-    if (filter === 'aa') entry.split = { people: 4, personalAmount: 0, reimbursements: [] }
     setEditor({ entry, editing: false })
   }
   useEffect(() => {
@@ -97,8 +95,7 @@ export default function FinanceBoard({
     document.addEventListener('keydown', key)
     return () => document.removeEventListener('keydown', key)
   })
-  const matchesKind = (e: FinanceEntry) =>
-    filter === 'all' || (filter === 'aa' ? !!e.split : e.type === filter)
+  const matchesKind = (e: FinanceEntry) => filter === 'all' || e.type === filter
   const query = search.trim().toLocaleLowerCase()
   const matchesText = (e: FinanceEntry) =>
     [e.title, e.note, finance.categories.find((c) => c.id === e.categoryId)?.name || ''].some((s) =>
@@ -111,24 +108,17 @@ export default function FinanceBoard({
       (account === 'all' || event.accountId === account) &&
       matchesKind(event.entry) &&
       matchesCategory(event.entry) &&
-      (matchesText(event.entry) || !!event.receipt?.note.toLocaleLowerCase().includes(query)) &&
-      (!event.receipt || filter === 'all' || filter === 'aa'),
+      (matchesText(event.entry) || !!event.receipt?.note.toLocaleLowerCase().includes(query)),
   )
   const entries = events.filter((e) => !e.receipt).map((e) => e.entry)
-  const summary = financeSummary(entries)
-  const outstanding = finance.entries.filter(
-    (e) =>
-      e.date <= today &&
-      pendingReimbursement(e, today) > 0 &&
-      (account === 'all' || e.accountId === account),
-  )
-  const pending = outstanding.reduce((s, e) => s + pendingReimbursement(e, today), 0)
+  const summary = financeSummary(events)
   const balances = finance.accounts.map((a) => ({
     ...a,
     balance: accountBalance(finance, a.id, today),
   }))
   const totalBalance = balances.reduce((s, a) => s + a.balance, 0)
   const expenseCategories = finance.categories
+    .filter((c) => c.type === 'expense' && c.id !== INVESTMENT_CATEGORY)
     .map((c) => ({
       ...c,
       total: entries
@@ -170,7 +160,7 @@ export default function FinanceBoard({
     setDetailId(null)
     setConfirm({
       title: '删除这笔账目？',
-      message: `“${entry.title}”将被删除${entry.split?.reimbursements.length ? '，关联的 AA 回款也会一并删除' : ''}，账户余额和统计会重新计算。`,
+      message: `“${entry.title}”将被删除${entry.split?.reimbursements.length ? '，关联的历史回款也会一并删除' : ''}，账户余额和统计会重新计算。`,
       action: () => {
         change((f) => ({ ...f, entries: f.entries.filter((e) => e.id !== entry.id) }))
         notify('账目已删除', () =>
@@ -197,13 +187,15 @@ export default function FinanceBoard({
   function row(event: LedgerEvent) {
     const e = event.entry,
       c = finance.categories.find((c) => c.id === e.categoryId)
-    const a = finance.accounts.find((a) => a.id === event.accountId)
     const kind = event.receipt ? 'receipt' : e.type
+    const title = event.receipt ? `历史回款 · ${e.title}` : e.title
+    const amount = event.receipt?.amount ?? (e.type === 'expense' ? -personalExpense(e) : e.amount)
+    const note = event.receipt ? event.receipt.note : e.note
     return (
       <button
         className="finance-entry-row"
-        key={event.id}
-        aria-label={`查看账目 ${event.receipt ? 'AA 回款 · ' : ''}${e.title}`}
+        key={`${e.id}:${event.id}`}
+        aria-label={`查看账目 ${title}`}
         onClick={() => setDetailId(e.id)}
       >
         <i
@@ -212,44 +204,25 @@ export default function FinanceBoard({
             kind === 'expense' && c ? { color: c.color, background: `${c.color}13` } : undefined
           }
         >
-          <Icon
-            name={
-              event.receipt ? 'Users' : e.type === 'adjustment' ? 'RefreshCw' : c?.icon || 'Wallet'
-            }
-            size={19}
-          />
+          <Icon name={event.receipt ? 'RefreshCw' : c?.icon || 'Wallet'} size={19} />
         </i>
         <span className="finance-entry-text">
-          <strong>
-            {event.receipt ? `AA 回款 · ${e.title}` : e.title}
-            {e.split && !event.receipt && <em>AA</em>}
-          </strong>
+          <strong>{title}</strong>
           <small>
-            {event.receipt ? '收回垫款' : e.type === 'adjustment' ? '对账调整' : c?.name} <b>·</b>{' '}
-            {a?.name}
-            {event.receipt?.note && ` · ${event.receipt.note}`}
-            {!event.receipt && e.note && ` · ${e.note}`}
+            {event.receipt ? '原付款回收' : c?.name} <b>·</b> {labelForAccount(event.accountId)}
+            {note && ` · ${note}`}
           </small>
         </span>
         <span className={`finance-entry-amount ${kind}`}>
           <strong>
-            {event.receipt || e.type === 'income' || (e.type === 'adjustment' && e.amount > 0)
-              ? '+'
-              : '−'}
-            {money(
-              event.receipt?.amount ??
-                (e.type === 'expense' ? personalExpense(e) : Math.abs(e.amount)),
-            )}
+            {amount < 0 ? '−' : amount > 0 ? '+' : ''}
+            {money(Math.abs(amount))}
           </strong>
-          <small>
-            {event.receipt
-              ? '不计收入'
-              : e.split
-                ? `实付 ${money(e.amount)} · 待收 ${money(pendingReimbursement(e))}`
-                : e.type === 'adjustment'
-                  ? '不计日常收支'
-                  : ''}
-          </small>
+          {event.receipt ? (
+            <small>计入实际到账</small>
+          ) : e.split ? (
+            <small>原付款 {money(e.amount)}</small>
+          ) : null}
         </span>
         <Icon name="ChevronRight" size={14} />
       </button>
@@ -259,7 +232,7 @@ export default function FinanceBoard({
     return (
       <div className="finance-timeline">
         {grouped(items).map(([day, list]) => {
-          const s = financeSummary(list.filter((e) => !e.receipt).map((e) => e.entry))
+          const s = financeSummary(list)
           return (
             <section className="finance-day-group" key={day}>
               <div className="finance-day-heading">
@@ -272,8 +245,11 @@ export default function FinanceBoard({
                   </span>
                 </h3>
                 <small>
-                  {s.income > 0 && <span className="income">收入 {money(s.income)}</span>}
+                  {s.income !== 0 && <span className="income">收入 {money(s.income)}</span>}
                   {s.expense > 0 && <span className="expense">支出 {money(s.expense)}</span>}
+                  {s.investment > 0 && (
+                    <span className="investment">投资 {money(s.investment)}</span>
+                  )}
                 </small>
               </div>
               <div className="finance-day-entries">{list.map(row)}</div>
@@ -288,23 +264,17 @@ export default function FinanceBoard({
   return (
     <>
       <aside className="sidebar finance-sidebar">
-        <div className="workspace-name">
-          <div className="workspace-avatar">
-            <Icon name="Leaf" size={17} />
-          </div>
-          <div>
-            <strong>我的生活空间</strong>
-            <span>每一笔，都有迹可循</span>
-          </div>
-        </div>
+        <WorkspaceName
+          name={data.preferences.name}
+          subtitle="每一笔，都有迹可循"
+          onChange={onChange}
+        />
         <nav className="smart-nav" aria-label="账目筛选">
           {(
             [
               ['all', '全部账目', 'Layers'],
-              ['expense', '日常支出', 'ArrowUpRight'],
-              ['income', '日常收入', 'Plus'],
-              ['aa', 'AA 均摊', 'Users'],
-              ['adjustment', '对账调整', 'RefreshCw'],
+              ['expense', '支出', 'ArrowUpRight'],
+              ['income', '收入', 'Plus'],
             ] as const
           ).map(([id, label, icon]) => (
             <button
@@ -314,7 +284,6 @@ export default function FinanceBoard({
             >
               <Icon name={icon} size={18} />
               <span>{label}</span>
-              {id === 'aa' && outstanding.length > 0 && <small>{outstanding.length}</small>}
             </button>
           ))}
         </nav>
@@ -351,7 +320,10 @@ export default function FinanceBoard({
             >
               <Icon name={a.icon} size={17} style={{ color: a.color }} />
               <span>
-                {a.name}
+                <span className="finance-account-label">
+                  {a.name}
+                  {a.note && <small title={a.note}>{a.note}</small>}
+                </span>
                 <small>¥{money(a.balance)}</small>
               </span>
             </button>
@@ -360,19 +332,6 @@ export default function FinanceBoard({
             <Icon name="Plus" size={14} />
             添加 / 管理账户
           </button>
-          <div className="finance-account-total">
-            <span>账户合计</span>
-            <strong>¥{money(totalBalance)}</strong>
-            <small>
-              另有 AA 待收 ¥
-              {money(
-                finance.entries.reduce(
-                  (s, e) => s + (e.date <= today ? pendingReimbursement(e, today) : 0),
-                  0,
-                ),
-              )}
-            </small>
-          </div>
         </div>
         <div className="sidebar-bottom">
           <button className="side-row" onClick={() => setManager('categories')}>
@@ -393,7 +352,8 @@ export default function FinanceBoard({
         <div className="main-topline">
           <div className="breadcrumb">
             <Icon name="Wallet" size={14} />
-            记账<span>/</span>生活账本
+            记账<span>/</span>
+            <h1 className="breadcrumb-heading">生活账本</h1>
           </div>
           <div className="main-topline-right">
             <span className={`save-status ${status}`} title={saveError || '更改会自动保存到本机'}>
@@ -425,23 +385,65 @@ export default function FinanceBoard({
           </div>
         </div>
         <div className="finance-scroll">
-          <header className="finance-heading">
-            <div>
-              <div className="finance-eyebrow">LIFE, ONE ENTRY AT A TIME</div>
-              <h1>
-                生活账本 <Icon name="Sprout" size={24} />
-              </h1>
-              <p>记下生活的来往，让每一分花得明白。</p>
+          <div className="module-summary-row">
+            <section className="finance-summary" aria-label="资金统计">
+              <div data-testid="finance-expense">
+                <span>
+                  <i className="expense-dot" />
+                  支出
+                </span>
+                <strong className="expense">
+                  <small>¥</small>
+                  {money(summary.expense)}
+                </strong>
+                <p>日常支出 · 不含投资</p>
+              </div>
+              <div data-testid="finance-income">
+                <span>
+                  <i className="income-dot" />
+                  收入
+                </span>
+                <strong className="income">
+                  <small>¥</small>
+                  {money(summary.income)}
+                </strong>
+                <p>含对账调整</p>
+              </div>
+              <div data-testid="finance-net">
+                <span>
+                  <Icon name="ChartNoAxesCombined" size={13} />
+                  结余
+                </span>
+                <strong>
+                  <small>¥</small>
+                  {money(summary.net)}
+                </strong>
+                <p>收入 − 日常支出</p>
+              </div>
+              <div data-testid="finance-liquid">
+                <span>
+                  <Icon name="Wallet" size={13} />
+                  流动资金
+                </span>
+                <strong>
+                  <small>¥</small>
+                  {money(totalBalance)}
+                </strong>
+                <p>当前全部账户余额</p>
+              </div>
+            </section>
+            <div className="module-summary-actions">
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => create()}
+                disabled={!finance.accounts.length}
+              >
+                <Icon name="Plus" size={16} />
+                记一笔
+              </button>
             </div>
-            <button
-              className="button primary"
-              onClick={() => create()}
-              disabled={!finance.accounts.length}
-            >
-              <Icon name="Plus" size={17} />
-              记一笔<kbd>Ctrl N</kbd>
-            </button>
-          </header>
+          </div>
           <div className="finance-period-bar">
             <div className="finance-month-nav">
               <button
@@ -480,46 +482,7 @@ export default function FinanceBoard({
                 本月
               </button>
             </div>
-            <span className="finance-period-note">慢慢记录，心中有数</span>
           </div>
-          <section className="finance-summary" aria-label="本月收支统计">
-            <div data-testid="finance-expense">
-              <span>
-                <i className="expense-dot" />
-                个人支出
-              </span>
-              <strong className="expense">
-                <small>¥</small>
-                {money(summary.expense)}
-              </strong>
-              <p>AA 只计我承担的部分</p>
-            </div>
-            <div data-testid="finance-income">
-              <span>
-                <i className="income-dot" />
-                日常收入
-              </span>
-              <strong className="income">
-                <small>¥</small>
-                {money(summary.income)}
-              </strong>
-              <p>AA 回款不重复计入</p>
-            </div>
-            <div data-testid="finance-net">
-              <span>
-                <Icon name="ChartNoAxesCombined" size={13} />
-                收支结余
-              </span>
-              <strong>
-                <small>¥</small>
-                {money(summary.income - summary.expense)}
-              </strong>
-              <p>
-                另有对账调整 {summary.adjustment >= 0 ? '+' : '−'}
-                {money(Math.abs(summary.adjustment))}
-              </p>
-            </div>
-          </section>
           <div className="finance-content-grid">
             <div className="finance-ledger">
               <div className="finance-ledger-toolbar">
@@ -562,17 +525,13 @@ export default function FinanceBoard({
                   {filter !== 'all'
                     ? (
                         {
-                          expense: '日常支出',
-                          income: '日常收入',
-                          aa: 'AA 均摊',
-                          adjustment: '对账调整',
+                          expense: '支出',
+                          income: '收入',
                         } as const
                       )[filter]
                     : '全部账目'}{' '}
                   · {events.length} 条记录
-                  {account !== 'all'
-                    ? ` · ${finance.accounts.find((a) => a.id === account)?.name}`
-                    : ''}
+                  {account !== 'all' ? ` · ${labelForAccount(account)}` : ''}
                 </span>
                 {selectedDay && (
                   <button onClick={() => setSelectedDay(null)}>
@@ -614,7 +573,7 @@ export default function FinanceBoard({
                     <div className="finance-calendar-grid">
                       {monthGrid(`${month}-01`).map((day) => {
                         const daily = events.filter((e) => e.date === day),
-                          s = financeSummary(daily.filter((e) => !e.receipt).map((e) => e.entry))
+                          s = financeSummary(daily)
                         const receipts = daily
                           .filter((e) => e.receipt)
                           .reduce((n, e) => n + e.receipt!.amount, 0)
@@ -631,15 +590,17 @@ export default function FinanceBoard({
                               <em className="finance-calendar-count">{daily.length}笔</em>
                             )}
                             {s.expense > 0 && <span className="expense">−{money(s.expense)}</span>}
-                            {s.income > 0 && <span className="income">+{money(s.income)}</span>}
+                            {s.income !== 0 && (
+                              <span className="income">
+                                {s.income > 0 ? '+' : '−'}
+                                {money(Math.abs(s.income))}
+                              </span>
+                            )}
+                            {s.investment > 0 && (
+                              <small className="investment">投资 −{money(s.investment)}</small>
+                            )}
                             {receipts > 0 && (
                               <small className="receipt">回款 +{money(receipts)}</small>
-                            )}
-                            {s.adjustment !== 0 && (
-                              <small className="adjustment">
-                                调 {s.adjustment > 0 ? '+' : '−'}
-                                {money(Math.abs(s.adjustment))}
-                              </small>
                             )}
                           </button>
                         )
@@ -664,20 +625,20 @@ export default function FinanceBoard({
               )}
               <p className="finance-ledger-foot">
                 <Icon name="CircleHelp" size={13} />
-                统计随当前月份与筛选变化；回款、对账调整单独展示。
+                支出、收入和结余随所选月份与筛选变化。账户余额含初始余额，历史回款按实际到账计入。
               </p>
             </div>
             <aside className="finance-insights">
               <section className="finance-report">
                 <div className="finance-section-title">
                   <h3>支出去向</h3>
-                  <span>按个人承担</span>
+                  <span>日常支出</span>
                 </div>
                 <div
                   className={`finance-donut ${summary.expense ? '' : 'empty'}`}
                   style={{ background: gradient ? `conic-gradient(${gradient})` : undefined }}
                   role="img"
-                  aria-label={`个人支出共 ${money(summary.expense)} 元`}
+                  aria-label={`日常支出共 ${money(summary.expense)} 元`}
                 >
                   <div>
                     <span>本月支出</span>
@@ -705,43 +666,6 @@ export default function FinanceBoard({
                   </div>
                 ) : (
                   <p className="finance-report-empty">记录支出后，看看钱花在哪里。</p>
-                )}
-              </section>
-              <section className="finance-aa-report">
-                <div className="finance-section-title">
-                  <h3>
-                    <Icon name="Users" size={16} />
-                    AA 待收
-                  </h3>
-                  <span>全部日期</span>
-                </div>
-                <strong className="finance-pending" data-testid="finance-pending">
-                  ¥{money(pending)}
-                </strong>
-                <p>已垫付、尚未收回的部分</p>
-                {outstanding.slice(0, 3).map((e) => (
-                  <button
-                    className="finance-outstanding"
-                    key={e.id}
-                    onClick={() => setDetailId(e.id)}
-                  >
-                    <span>
-                      {e.title}
-                      <small>
-                        {shortDate(e.date)} · {e.split!.people} 人均摊
-                      </small>
-                    </span>
-                    <strong>
-                      {money(pendingReimbursement(e, today))}
-                      <Icon name="ChevronRight" size={12} />
-                    </strong>
-                  </button>
-                ))}
-                {outstanding.length === 0 && (
-                  <div className="finance-aa-clear">
-                    <Icon name="CheckCircle2" size={17} />
-                    没有待收垫款，轻轻松松。
-                  </div>
                 )}
               </section>
               <div className="finance-quiet-note">
@@ -796,41 +720,11 @@ export default function FinanceBoard({
           }}
         />
       )}
-      {receiptEntry && (
-        <ReimbursementEditor
-          entry={receiptEntry}
-          finance={finance}
-          onClose={() => setReceiptFor(null)}
-          onSave={(receipt) => {
-            change((f) => ({
-              ...f,
-              entries: f.entries.map((e) =>
-                e.id === receiptEntry.id && e.split && receipt.amount <= pendingReimbursement(e)
-                  ? {
-                      ...e,
-                      split: { ...e.split, reimbursements: [...e.split.reimbursements, receipt] },
-                    }
-                  : e,
-              ),
-            }))
-            setReceiptFor(null)
-            notify('AA 回款已保存，不计入收入')
-          }}
-        />
-      )}
       {detail && (
         <Modal title="账目详情" onClose={() => setDetailId(null)}>
           <div className="finance-detail">
             <div className={`finance-detail-amount ${detail.type}`}>
-              <span>
-                {detail.type === 'income'
-                  ? '收入'
-                  : detail.type === 'adjustment'
-                    ? '对账调整'
-                    : detail.split
-                      ? '个人承担'
-                      : '支出'}
-              </span>
+              <span>{detail.type === 'income' ? '收入' : '支出'}</span>
               <strong>
                 ¥{money(detail.type === 'expense' ? personalExpense(detail) : detail.amount)}
               </strong>
@@ -843,15 +737,11 @@ export default function FinanceBoard({
               </div>
               <div>
                 <dt>使用账户</dt>
-                <dd>{finance.accounts.find((a) => a.id === detail.accountId)?.name}</dd>
+                <dd>{labelForAccount(detail.accountId)}</dd>
               </div>
               <div>
                 <dt>分类</dt>
-                <dd>
-                  {detail.type === 'adjustment'
-                    ? '对账调整 · 不计日常收支'
-                    : finance.categories.find((c) => c.id === detail.categoryId)?.name}
-                </dd>
+                <dd>{finance.categories.find((c) => c.id === detail.categoryId)?.name}</dd>
               </div>
               {detail.note && (
                 <div>
@@ -861,83 +751,20 @@ export default function FinanceBoard({
               )}
             </dl>
             {detail.split && (
-              <section className="finance-detail-aa">
-                <div className="finance-section-title">
-                  <h3>
-                    <Icon name="Users" size={16} />
-                    AA 均摊 · {detail.split.people} 人
-                  </h3>
-                </div>
-                <div className="finance-detail-aa-grid">
-                  <span>
-                    实际代付<strong>¥{money(detail.amount)}</strong>
-                  </span>
-                  <span>
-                    我的承担<strong>¥{money(detail.split.personalAmount)}</strong>
-                  </span>
-                  <span>
-                    已收回<strong>¥{money(reimbursed(detail))}</strong>
-                  </span>
-                  <span>
-                    还待收<strong>¥{money(pendingReimbursement(detail))}</strong>
-                  </span>
-                </div>
-                <p className="finance-hint">付款账户按实付金额扣除，消费统计只记我的承担。</p>
+              <section className="finance-history-cash">
+                <p className="finance-hint">历史付款 ¥{money(detail.amount)}</p>
                 {detail.split.reimbursements.map((r) => (
                   <div className="finance-receipt-row" key={r.id}>
                     <span>
-                      {r.date}
+                      {r.date} · 已到账
                       <small>
-                        {finance.accounts.find((a) => a.id === r.accountId)?.name}
+                        {labelForAccount(r.accountId)}
                         {r.note && ` · ${r.note}`}
                       </small>
                     </span>
                     <strong>+{money(r.amount)}</strong>
-                    <button
-                      className="icon-button"
-                      aria-label={`删除回款 ${r.id}`}
-                      onClick={() => {
-                        setDetailId(null)
-                        setConfirm({
-                          title: '删除这笔回款？',
-                          message: '账户余额将扣回此笔回款，AA 待收金额会相应恢复。',
-                          action: () => {
-                            change((f) => ({
-                              ...f,
-                              entries: f.entries.map((e) =>
-                                e.id === detail.id && e.split
-                                  ? {
-                                      ...e,
-                                      split: {
-                                        ...e.split,
-                                        reimbursements: e.split.reimbursements.filter(
-                                          (receipt) => receipt.id !== r.id,
-                                        ),
-                                      },
-                                    }
-                                  : e,
-                              ),
-                            }))
-                            notify('回款已删除')
-                          },
-                        })
-                      }}
-                    >
-                      <Icon name="Trash2" size={14} />
-                    </button>
                   </div>
                 ))}
-                {pendingReimbursement(detail) > 0 && (
-                  <button
-                    className="button primary full"
-                    onClick={() => {
-                      setDetailId(null)
-                      setReceiptFor(detail.id)
-                    }}
-                  >
-                    <Icon name="Plus" size={15} />记 AA 回款
-                  </button>
-                )}
               </section>
             )}
           </div>

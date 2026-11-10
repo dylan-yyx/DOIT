@@ -11,8 +11,24 @@
   margin: 0 5px;
   flex-shrink: 0;
 }
-.habit-group-nav .side-row {
+.habit-group-nav > .side-row,
+.habit-group-row {
   margin-bottom: 5px;
+}
+.habit-group-row {
+  display: flex;
+  align-items: center;
+}
+.habit-group-row > .side-row {
+  flex: 1;
+  min-width: 0;
+}
+.habit-group-delete {
+  flex-shrink: 0;
+}
+.habit-group-delete:hover,
+.habit-group-delete:focus-visible {
+  color: #aa6157;
 }
 .habit-side-note {
   margin: 62px 13px 20px;
@@ -90,153 +106,6 @@
   padding: 0;
   color: #93a08c;
 }
-.habit-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 9px 0 24px;
-}
-.habit-heading .eyebrow {
-  font-size: 10px;
-  letter-spacing: 0.6px;
-  color: #9aa58f;
-}
-.habit-heading h1 {
-  font-size: 29px;
-  font-weight: 550;
-  letter-spacing: 1.5px;
-  color: #405c43;
-  margin: 9px 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.habit-heading h1 svg {
-  color: #a4b78f;
-}
-.habit-heading p {
-  font-size: 11px;
-  color: #8b9a80;
-  letter-spacing: 0.4px;
-}
-.habit-heading .button {
-  font-size: 11px;
-  padding: 10px 14px;
-}
-.habit-day-summary {
-  border: 1px solid #dfe9d7;
-  border-radius: 12px;
-  padding: 20px 23px;
-  background: linear-gradient(110deg, #eef4e8 0%, #f4f7ee 70%, #eef4e8 100%);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: relative;
-  overflow: hidden;
-  min-height: 132px;
-}
-.habit-day-summary > div:first-child {
-  z-index: 1;
-}
-.habit-summary-kicker {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #91a07f;
-  font-size: 7px;
-  letter-spacing: 1.5px;
-}
-.habit-summary-kicker > i {
-  width: 5px;
-  height: 5px;
-  background: #8ca477;
-  border-radius: 50%;
-}
-.habit-day-summary h2 {
-  font-size: 17px;
-  font-weight: 500;
-  color: #5b7750;
-  margin: 11px 0 9px;
-  letter-spacing: 0.6px;
-}
-.habit-day-summary p {
-  font-size: 10px;
-  color: #8b9b7d;
-}
-.habit-day-summary p strong {
-  color: #598167;
-  font-weight: 600;
-}
-.habit-day-summary p > span {
-  font-size: 9px;
-  margin-left: 14px;
-  color: #a0ae91;
-}
-.habit-summary-track {
-  width: 205px;
-  height: 4px;
-  border-radius: 4px;
-  background: #e0e9d6;
-  margin-top: 14px;
-  overflow: hidden;
-}
-.habit-summary-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: #82a083;
-  transition: width 0.3s;
-}
-.habit-summary-ring {
-  width: 80px;
-  height: 80px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: conic-gradient(#7ba184 var(--completion), #dfe9d7 0);
-  padding: 5px;
-  z-index: 1;
-  margin-right: 8px;
-  transform: rotate(-0.01deg);
-}
-.habit-summary-ring > div {
-  width: 100%;
-  height: 100%;
-  background: #f3f7ed;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-}
-.habit-summary-ring strong {
-  color: #648365;
-  font-size: 24px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.habit-summary-ring strong small {
-  font-size: 12px;
-  margin-left: 2px;
-}
-.habit-summary-ring > div > span {
-  font-size: 9px;
-  margin-top: 2px;
-  color: #9aa98e;
-}
-.habit-summary-deco {
-  position: absolute;
-  right: 88px;
-  bottom: -23px;
-  color: #dee8d4;
-  opacity: 0.5;
-  transform: rotate(-23deg);
-}
-.habit-week-section {
-  margin: 23px 0 0;
-}
 .habit-week-heading {
   display: flex;
   align-items: center;
@@ -252,11 +121,6 @@
   font-size: 12px;
   font-weight: 500;
   color: #5f7457;
-}
-.habit-week-heading > div > span {
-  font-size: 9px;
-  color: #a5ae9a;
-  margin-left: 9px;
 }
 .habit-today-button {
   font-size: 10px;
@@ -379,86 +243,91 @@
 .habit-card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
+  gap: 8px;
 }
 .habit-card {
-  border: 1px solid #e5eadf;
-  border-radius: 10px;
-  padding: 16px 16px 0;
-  cursor: pointer;
-  background: #fffefa;
-  transition:
-    border-color 0.16s,
-    box-shadow 0.16s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
   min-width: 0;
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  background: var(--card-surface);
 }
-.habit-card:hover {
-  border-color: color-mix(in srgb, var(--habit-color) 45%, white);
-  box-shadow: 0 4px 14px #37482b06;
+.habit-card:hover,
+.habit-card.selected {
+  border-color: color-mix(in srgb, var(--habit-color) 60%, var(--line));
 }
 .habit-card.selected {
-  border-color: color-mix(in srgb, var(--habit-color) 65%, white);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--habit-color) 10%, white);
-  background: color-mix(in srgb, var(--habit-color) 2%, #fffefa);
+  box-shadow: inset 2px 0 var(--habit-color);
 }
-.habit-card-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.habit-card-icon {
-  height: 37px;
-  width: 37px;
-  border-radius: 11px;
-  display: grid;
-  place-items: center;
-  color: var(--habit-color);
-  background: color-mix(in srgb, var(--habit-color) 10%, white);
-}
-.habit-card-top > div {
-  flex: 1;
+.habit-card-info {
   min-width: 0;
 }
-.habit-card-top h3 {
-  font-size: 13px;
-  font-weight: 550;
-  color: #4e6546;
-  line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.habit-card-top > div > span {
-  font-size: 9px;
-  color: #a1ad96;
-}
-.habit-card-top > button {
-  margin-right: -5px;
-  align-self: flex-start;
-  color: #a6b09d;
-}
-.habit-card-goal {
+.habit-card-name {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  color: #9aa68f;
-  margin: 13px 0;
-  overflow: hidden;
-  white-space: nowrap;
+  gap: 4px;
 }
-.habit-card-goal > i {
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: #b3bca9;
-  margin: 0 3px;
+.habit-card-name h3 {
+  min-width: 0;
+}
+.habit-card-name > svg {
+  color: color-mix(in srgb, var(--habit-color) 75%, var(--theme-text));
+}
+.habit-card-edit {
+  flex-shrink: 0;
+  padding: 0;
+  color: var(--theme-muted);
+  opacity: 0;
+}
+.habit-card:hover .habit-card-edit,
+.habit-card:focus-within .habit-card-edit {
+  opacity: 1;
+}
+.habit-card-info h3 > button {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--theme-text);
+  text-align: left;
+}
+.habit-card-info h3 > button:hover {
+  color: var(--theme-accent);
+}
+.habit-card-stats,
+.habit-card-stats > span {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.habit-card-stats {
+  margin-top: 3px;
+  gap: 8px;
+  color: var(--theme-muted);
+  font-size: 10px;
+}
+.habit-card-stats svg {
+  flex-shrink: 0;
+  color: var(--habit-color);
 }
 .habit-card-week {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 13px;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  width: min(54%, 192px);
+  flex-shrink: 0;
 }
 .habit-cell {
   background: #eef1e9;
@@ -485,85 +354,28 @@
   color: #fff;
 }
 .habit-card-week > .habit-cell {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  font-size: 10px;
+}
+.habit-card-week > .habit-cell.intensity-0 {
+  color: var(--theme-muted);
 }
 .habit-card-week > .habit-cell.current {
-  outline: 1px solid color-mix(in srgb, var(--habit-color) 45%, white);
-  outline-offset: 2px;
-  margin-right: 4px;
+  box-shadow: inset 0 0 0 1px var(--habit-color);
 }
-.habit-streak {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: #a5b09a;
-  font-size: 9px;
-  margin-left: auto;
-  white-space: nowrap;
+.habit-card-week > .habit-cell:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
-.habit-streak svg {
-  color: #b3bfa5;
-}
-.habit-card-bottom {
-  min-height: 44px;
-  border-top: 1px solid #edf0e7;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 6px;
-}
-.habit-card-bottom > span {
-  font-size: 10px;
-  color: #a0ac94;
-  display: flex;
-  align-items: baseline;
-  gap: 3px;
-}
-.habit-card-bottom > span > strong {
-  font-size: 15px;
-  font-weight: 550;
-  color: #7e9270;
-}
-.habit-card-bottom > span.done {
-  color: var(--habit-color);
-}
-.habit-card-bottom > span.done strong {
-  color: var(--habit-color);
-}
-.habit-card-bottom em {
-  font-size: 7px;
-  font-style: normal;
-  background: color-mix(in srgb, var(--habit-color) 9%, white);
-  color: var(--habit-color);
-  padding: 3px 5px;
-  border-radius: 3px;
-  margin-left: 4px;
-}
-.habit-card-action {
-  border: 1px solid #dee8d6;
-  border-radius: 5px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 9px;
-  font-size: 9px;
-  color: #92a17f;
-  flex-shrink: 0;
-}
-.habit-card-action:hover {
-  background: #f0f5ea;
-  color: #6b855a;
-}
-.habit-card-action.done {
-  background: color-mix(in srgb, var(--habit-color) 8%, white);
-  border-color: transparent;
-  color: var(--habit-color);
+.habit-card-week > .habit-cell:not(:disabled):hover {
+  outline: 1px solid var(--habit-color);
+  outline-offset: 1px;
 }
 .habit-add-card {
   grid-column: 1 / -1;
-  min-height: 57px;
+  min-height: 40px;
   border: 1px dashed #dce5d4;
   border-radius: 8px;
   display: flex;
@@ -725,6 +537,7 @@
   outline-offset: 1px;
 }
 .habit-detail {
+  --habit-detail-padding: 23px;
   width: 308px;
   flex-shrink: 0;
   display: flex;
@@ -753,7 +566,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 23px;
+  padding: 0 var(--habit-detail-padding) 12px;
 }
 .habit-detail-identity {
   text-align: center;
@@ -1101,25 +914,23 @@
   font-size: 11px;
 }
 .habit-detail-bottom {
-  padding: 24px 0 22px;
-  margin-top: 7px;
+  flex-shrink: 0;
+  padding: 6px var(--habit-detail-padding);
+  border-top: 1px solid #e6ecdf;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #b3bda5;
+  color: #78866e;
 }
 .habit-detail-bottom > span {
-  font-size: 8px;
+  font-size: 10px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.habit-detail-bottom > button {
-  color: #b9c1ae;
-  padding: 5px;
-}
-.habit-detail-bottom > button:hover {
-  color: #bb7c70;
+.habit-detail-bottom > button:hover,
+.habit-detail-bottom > button:focus-visible {
+  color: #aa6157;
 }
 .habit-form {
   display: flex;
@@ -1191,34 +1002,6 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-}
-.habit-form-colors {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding-bottom: 5px;
-}
-.habit-form-colors > span {
-  font-size: 11px;
-  color: #7d9271;
-}
-.habit-form-colors > div {
-  display: flex;
-  gap: 12px;
-  padding-top: 9px;
-}
-.habit-form-colors button {
-  height: 22px;
-  width: 22px;
-  border-radius: 50%;
-  padding: 0;
-  color: white;
-  display: grid;
-  place-items: center;
-}
-.habit-form-colors button[aria-pressed='true'] {
-  outline: 1px solid #a5b894;
-  outline-offset: 3px;
 }
 .habit-week-picker {
   display: flex;
@@ -1334,18 +1117,8 @@
     padding-right: 40px;
   }
   .habit-detail {
+    --habit-detail-padding: 27px;
     width: 330px;
-  }
-  .habit-detail-scroll {
-    padding-left: 27px;
-    padding-right: 27px;
-  }
-  .habit-card {
-    padding-top: 19px;
-  }
-  .habit-card-goal {
-    margin-top: 15px;
-    margin-bottom: 15px;
   }
 }
 @media (max-width: 1260px) {
@@ -1353,11 +1126,8 @@
     width: 184px;
   }
   .habit-detail {
+    --habit-detail-padding: 18px;
     width: 273px;
-  }
-  .habit-detail-scroll {
-    padding-left: 18px;
-    padding-right: 18px;
   }
   .habit-detail-top {
     padding: 0 18px;
@@ -1372,53 +1142,9 @@
   .habit-topline .save-status {
     display: none;
   }
-  .habit-card {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
   .habit-card-week {
-    gap: 4px;
-  }
-  .habit-card-week > .habit-cell {
-    width: 18px;
-    height: 18px;
-  }
-  .habit-card-goal {
-    font-size: 8px;
-    gap: 4px;
-  }
-  .habit-streak {
-    font-size: 8px;
-  }
-  .habit-card-bottom em {
-    display: none;
-  }
-  .habit-card-bottom > span {
-    font-size: 9px;
-  }
-  .habit-card-action {
-    padding: 5px 6px;
-    font-size: 8px;
-  }
-  .habit-day-summary {
-    padding: 18px;
-  }
-  .habit-day-summary h2 {
-    font-size: 14px;
-  }
-  .habit-day-summary p > span {
-    display: none;
-  }
-  .habit-summary-ring {
-    width: 66px;
-    height: 66px;
-    margin-right: 0;
-  }
-  .habit-summary-track {
-    width: 170px;
-  }
-  .habit-week-heading > div > span {
-    display: none;
+    width: min(60%, 172px);
+    gap: 3px;
   }
   .habit-week-strip {
     gap: 6px;

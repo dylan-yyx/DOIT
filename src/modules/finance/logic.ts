@@ -1,4 +1,11 @@
-import type { AppData, FinanceData, FinanceEntry, Reimbursement } from '../../core/types'
+import type {
+  AppData,
+  FinanceAccount,
+  FinanceCategory,
+  FinanceData,
+  FinanceEntry,
+  Reimbursement,
+} from '../../core/types'
 import { dateKey, parseDate } from '../../core/dates'
 
 export const money = (cents: number) =>
@@ -14,6 +21,43 @@ export function parseMoney(value: string): number | null {
       : cents
     : null
 }
+export const INVESTMENT_CATEGORY = 'investment'
+export const RECONCILIATION_CATEGORY = 'reconciliation'
+
+const categorySeeds: Record<FinanceCategory['type'], [string, string, string, string][]> = {
+  expense: [
+    ['food', '饮食', 'Utensils', '#c68570'],
+    ['clothes', '衣着', 'Shirt', '#b18283'],
+    ['home', '住房', 'Home', '#c3a05d'],
+    ['transport', '交通', 'Bus', '#6b8ca9'],
+    ['shopping', '购物', 'ShoppingCart', '#937caf'],
+    ['communication', '通信', 'Smartphone', '#527e8d'],
+    ['fun', '娱乐', 'Music', '#a9743f'],
+    ['study', '教育', 'BookOpen', '#548f76'],
+    ['health', '医疗', 'HeartPulse', '#d16d72'],
+    ['charity', '公益', 'HeartHandshake', '#bc7e81'],
+    [INVESTMENT_CATEGORY, '投资', 'ChartNoAxesCombined', '#635e7d'],
+    ['other-expense', '其他', 'Layers', '#7d8a89'],
+  ],
+  income: [
+    ['salary', '工资', 'BriefcaseBusiness', '#237b65'],
+    ['bonus', '奖金', 'Sparkles', '#c3a05d'],
+    ['red-packet', '红包', 'Gift', '#d16d72'],
+    ['side-income', '兼职', 'Laptop', '#6b8ca9'],
+    ['secondhand', '二手', 'Repeat2', '#937caf'],
+    [RECONCILIATION_CATEGORY, '对账调整', 'RefreshCw', '#738967'],
+  ],
+}
+function defaultCategories(): FinanceCategory[] {
+  return (['expense', 'income'] as const).flatMap((type) =>
+    categorySeeds[type].map(([id, name, icon, color]) => ({ id, name, icon, color, type })),
+  )
+}
+export const builtInCategory = (category: FinanceCategory) =>
+  categorySeeds[category.type].some(([id]) => id === category.id)
+export const accountLabel = (account: FinanceAccount) =>
+  account.note ? `${account.name} · ${account.note}` : account.name
+
 export function createFinanceData(): FinanceData {
   return {
     accounts: [
@@ -22,31 +66,64 @@ export function createFinanceData(): FinanceData {
       { id: 'bank', name: '银行卡', icon: 'Landmark', color: '#937caf', openingBalance: 0 },
       { id: 'cash', name: '现金', icon: 'Wallet', color: '#c3a05d', openingBalance: 0 },
     ],
-    categories: [
-      ['food', '饮食', 'Coffee', '#c68570'],
-      ['transport', '交通', 'Plane', '#6b8ca9'],
-      ['shopping', '购物', 'Tag', '#937caf'],
-      ['home', '居住', 'Home', '#c3a05d'],
-      ['fun', '休闲娱乐', 'Music', '#738967'],
-      ['health', '医疗健康', 'Heart', '#d16d72'],
-      ['study', '学习成长', 'BookOpen', '#548f76'],
-      ['other-expense', '其他支出', 'Layers', '#7d8a89'],
-      ['salary', '工资', 'BriefcaseBusiness', '#237b65'],
-      ['bonus', '奖金', 'Sparkles', '#c3a05d'],
-      ['side-income', '兼职', 'Laptop', '#6b8ca9'],
-      ['other-income', '其他收入', 'Plus', '#738967'],
-    ].map(([id, name, icon, color], index) => ({
-      id,
-      name,
-      icon,
-      color,
-      type: index < 8 ? 'expense' : 'income',
-    })),
+    categories: defaultCategories(),
     entries: [],
+    categoryVersion: 2,
   }
 }
-export const withFinanceData = (data: AppData): AppData =>
-  data.finance ? data : { ...data, finance: createFinanceData() }
+
+const legacyNames: Record<string, string> = {
+  home: '居住',
+  fun: '休闲娱乐',
+  study: '学习成长',
+  health: '医疗健康',
+  'other-expense': '其他支出',
+}
+
+export const withFinanceData = (data: AppData): AppData => {
+  const finance = data.finance
+  if (!finance) return { ...data, finance: createFinanceData() }
+  if (finance.categoryVersion === 2) return data
+
+  const ids = new Map<string, string>()
+  const categories = defaultCategories().map((preset) => {
+    const matches = finance.categories.filter(
+      (c) =>
+        !ids.has(c.id) &&
+        c.type === preset.type &&
+        (c.name === preset.name || (c.id === preset.id && c.name === legacyNames[preset.id])),
+    )
+    for (const category of matches) ids.set(category.id, preset.id)
+    const previous = matches.find((c) => c.name === preset.name) || matches[0]
+    return previous ? { ...preset, icon: previous.icon, color: previous.color } : preset
+  })
+  const occupied = new Set([...categories, ...finance.categories].map((category) => category.id))
+  const presetIds = new Set(categories.map((category) => category.id))
+  for (const category of finance.categories) {
+    if (ids.has(category.id)) continue
+    if (
+      category.id === 'other-income' &&
+      category.name === '其他收入' &&
+      !finance.entries.some((entry) => entry.categoryId === category.id)
+    )
+      continue
+    let id = category.id
+    if (presetIds.has(id)) {
+      id = `legacy:${id}`
+      while (occupied.has(id)) id = `legacy:${id}`
+    }
+    occupied.add(id)
+    ids.set(category.id, id)
+    categories.push({ ...category, id })
+  }
+  const entries = finance.entries.map((entry): FinanceEntry =>
+    entry.type === 'adjustment'
+      ? { ...entry, type: 'income', categoryId: RECONCILIATION_CATEGORY }
+      : { ...entry, categoryId: ids.get(entry.categoryId) ?? entry.categoryId },
+  )
+  return { ...data, finance: { ...finance, categories, entries, categoryVersion: 2 } }
+}
+
 export function newFinanceEntry(accountId = 'alipay', date = dateKey()): FinanceEntry {
   return {
     id: crypto.randomUUID(),
@@ -66,17 +143,9 @@ export const reimbursed = (entry: FinanceEntry, through = '9999-12-31') =>
   entry.split?.reimbursements
     .filter((r) => r.date <= through)
     .reduce((sum, r) => sum + r.amount, 0) || 0
-export const pendingReimbursement = (entry: FinanceEntry, through = '9999-12-31') =>
-  entry.split ? entry.amount - entry.split.personalAmount - reimbursed(entry, through) : 0
-export function accountBalance(
-  finance: FinanceData,
-  id: string,
-  through = '9999-12-31',
-  exclude = '',
-) {
+export function accountBalance(finance: FinanceData, id: string, through = '9999-12-31') {
   let balance = finance.accounts.find((a) => a.id === id)?.openingBalance || 0
   for (const e of finance.entries) {
-    if (e.id === exclude) continue
     if (e.date <= through && e.accountId === id)
       balance += e.type === 'expense' ? -e.amount : e.amount
     for (const r of e.split?.reimbursements || [])
@@ -84,15 +153,20 @@ export function accountBalance(
   }
   return balance
 }
-export function financeSummary(entries: FinanceEntry[]) {
-  return entries.reduce(
-    (sum, e) => ({
-      income: sum.income + (e.type === 'income' ? e.amount : 0),
-      expense: sum.expense + personalExpense(e),
-      adjustment: sum.adjustment + (e.type === 'adjustment' ? e.amount : 0),
-    }),
-    { income: 0, expense: 0, adjustment: 0 },
-  )
+export function financeSummary(events: LedgerEvent[]) {
+  let income = 0,
+    expense = 0,
+    investment = 0
+  for (const { entry, receipt } of events) {
+    if (receipt) continue
+    if (entry.type === 'expense') {
+      if (entry.categoryId === INVESTMENT_CATEGORY) investment += personalExpense(entry)
+      else expense += personalExpense(entry)
+    } else {
+      income += entry.amount
+    }
+  }
+  return { income, expense, investment, net: income - expense }
 }
 export interface LedgerEvent {
   id: string
@@ -142,7 +216,13 @@ export function validateFinanceData(value: unknown): boolean {
       )
     )
       return false
-    if (!f.accounts.every((a) => entity(a) && cents(a.openingBalance))) return false
+    if (f.categoryVersion !== undefined && f.categoryVersion !== 2) return false
+    if (
+      !f.accounts.every(
+        (a) => entity(a) && cents(a.openingBalance) && (a.note === undefined || str(a.note)),
+      )
+    )
+      return false
     if (!f.categories.every((c) => entity(c) && ['expense', 'income'].includes(c.type)))
       return false
     return f.entries.every((e) => {
@@ -161,10 +241,16 @@ export function validateFinanceData(value: unknown): boolean {
       )
         return false
       if (e.type === 'adjustment')
-        return e.amount !== 0 && e.categoryId === '' && e.split === undefined
+        return (
+          f.categoryVersion === undefined &&
+          e.amount !== 0 &&
+          e.categoryId === '' &&
+          e.split === undefined
+        )
       if (
         !['expense', 'income'].includes(e.type) ||
-        e.amount <= 0 ||
+        e.amount === 0 ||
+        (e.amount < 0 && !(e.type === 'income' && e.categoryId === RECONCILIATION_CATEGORY)) ||
         !f.categories.some((c) => c.id === e.categoryId && c.type === e.type)
       )
         return false

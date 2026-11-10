@@ -1,6 +1,6 @@
 {
   "name": "doit-desktop",
-  "version": "0.3.3",
+  "version": "0.4.10",
   "private": true,
   "description": "DOIT 拾序 — 个人管理桌面工作台",
   "type": "module",
@@ -16,6 +16,9 @@
     "test:finance": "node scripts/finance-e2e.mjs",
     "test:assets": "node scripts/assets-e2e.mjs",
     "test:appearance": "node scripts/appearance-e2e.mjs",
+    "test:tags": "node scripts/tags-e2e.mjs",
+    "test:workspace": "node scripts/workspace-e2e.mjs",
+    "test:window": "node scripts/window-e2e.mjs",
     "package": "node scripts/package.mjs",
     "package:installer": "node scripts/installer.mjs"
   },

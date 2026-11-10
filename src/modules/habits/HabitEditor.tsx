@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Habit, HabitGroup } from '../../core/types'
 import Icon from '../../components/Icon'
 import Modal from '../../components/Modal'
+import { ColorPicker, IconPicker } from '../../components/StylePicker'
 import { habitColors, habitFrequencies, habitPresets } from './logic'
 
 export default function HabitEditor({
@@ -24,15 +25,12 @@ export default function HabitEditor({
   const patch = (value: Partial<Habit>) => setHabit((h) => ({ ...h, ...value }))
   function usePreset(item: (typeof habitPresets)[number]) {
     setPreset(item.name)
-    const group = groups.find((g) => g.name === item.group)
     patch({
       name: item.name,
       icon: item.icon,
       color: item.color,
-      groupId: group?.id || '__new',
       goal: { type: item.type, target: item.target, unit: item.unit },
     })
-    setGroupName(group ? '' : item.group)
   }
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -180,7 +178,7 @@ export default function HabitEditor({
               <option value="__new">＋ 新建分组</option>
             </select>
           </label>
-          {habit.groupId === '__new' ? (
+          {habit.groupId === '__new' && (
             <label>
               新分组名称
               <input
@@ -190,26 +188,20 @@ export default function HabitEditor({
                 placeholder="比如：我的晨间习惯"
               />
             </label>
-          ) : (
-            <div className="habit-form-colors">
-              <span>标记颜色</span>
-              <div>
-                {habitColors.map((color) => (
-                  <button
-                    type="button"
-                    key={color}
-                    aria-label={`习惯颜色 ${color}`}
-                    aria-pressed={color === habit.color}
-                    style={{ background: color }}
-                    onClick={() => patch({ color })}
-                  >
-                    {color === habit.color && <Icon name="Check" size={13} />}
-                  </button>
-                ))}
-              </div>
-            </div>
           )}
         </div>
+        <IconPicker
+          kind="habit"
+          value={habit.icon}
+          color={habit.color}
+          onChange={(icon) => patch({ icon })}
+        />
+        <ColorPicker
+          value={habit.color}
+          classic={habitColors}
+          label="习惯颜色"
+          onChange={(color) => patch({ color })}
+        />
         <section className="habit-goal-config">
           <div className="habit-form-label">
             目标 <span>怎样算完成一次？</span>

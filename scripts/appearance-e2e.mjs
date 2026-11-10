@@ -47,6 +47,10 @@ const themeNames = [
 ]
 try {
   await launch()
+  assert.equal((await read()).tasks.length, 0)
+  await page.getByLabel('快速添加事项').fill('外观验证事项')
+  await page.getByLabel('快速添加事项').press('Enter')
+  await saved()
   const original = await read()
   await openSettings()
   await expect(settings().getByRole('tab', { name: '外观', exact: true })).toHaveAttribute(
@@ -57,14 +61,14 @@ try {
   const content = await page.locator('.settings-main').boundingBox()
   assert.ok(navigation.x + navigation.width <= content.x + 1)
   await settings().getByRole('tab', { name: '外观', exact: true }).focus()
-  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('End')
   await expect(settings().getByRole('tabpanel', { name: '数据管理', exact: true })).toBeVisible()
   await expect(settings().getByRole('button', { name: '鼠尾草主题', exact: true })).toBeHidden()
   await page.screenshot({
     path: 'test-results/settings-data-management.png',
     animations: 'disabled',
   })
-  await page.keyboard.press('ArrowUp')
+  await page.keyboard.press('Home')
   await expect(settings().getByRole('tabpanel', { name: '外观', exact: true })).toBeVisible()
   await expect(settings().getByRole('button', { name: '鼠尾草主题', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -278,7 +282,11 @@ try {
   await saved()
   assert.equal((await read()).preferences.appearance.customImage, undefined)
   await expect(page.locator('html')).toHaveAttribute('data-background', 'solid')
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1080, 700))
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    window.unmaximize()
+    window.setSize(1080, 700)
+  })
   await settings().getByRole('button', { name: '楷体字体', exact: true }).click()
   await saved()
   await page.screenshot({

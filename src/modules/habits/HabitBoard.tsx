@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { AppData, Habit, HabitGroup } from '../../core/types'
-import { addDays, dateKey, parseDate, shortDate, startOfWeek, weekdays } from '../../core/dates'
+import { addDays, dateKey, parseDate, shortDate, startOfWeek } from '../../core/dates'
 import Icon from '../../components/Icon'
+import CompletionSummary from '../../components/CompletionSummary'
 import Modal from '../../components/Modal'
+import WorkspaceName from '../../components/WorkspaceName'
 import HabitEditor from './HabitEditor'
 import HabitDetail from './HabitDetail'
 import {
   habitDone,
-  habitFrequencyText,
+  habitGoalText,
   habitIntensity,
   habitOccursOn,
   habitPresets,
@@ -45,14 +47,18 @@ export default function HabitBoard({
   const [selected, setSelected] = useState<string | null>(habits[0]?.id || null)
   const [editor, setEditor] = useState<{ habit: Habit; editing: boolean } | null>(null)
   const [deleting, setDeleting] = useState<Habit | null>(null)
+  const [deletingGroup, setDeletingGroup] = useState<HabitGroup | null>(null)
+  const [recording, setRecording] = useState<{ id: string; day: string; amount: string } | null>(
+    null,
+  )
   const [showDetails, setShowDetails] = useState(true)
   useEffect(() => {
     setDay((current) => (current === addDays(today, -1) ? today : current))
   }, [today])
   const scheduled = habits.filter((h) => habitOccursOn(h, day))
   const done = scheduled.filter((h) => habitDone(h, day)).length
-  const percent = scheduled.length ? Math.round((done / scheduled.length) * 100) : 0
   const selectedHabit = habits.find((h) => h.id === selected)
+  const recordingHabit = habits.find((h) => h.id === recording?.id)
   const visible = habits.filter(
     (h) =>
       (filter === 'today'
@@ -74,10 +80,8 @@ export default function HabitBoard({
         name: preset.name,
         icon: preset.icon,
         color: preset.color,
-        groupId: groups.find((g) => g.name === preset.group)?.id || '',
         goal: { type: preset.type, target: preset.target, unit: preset.unit },
       })
-    else if (groups.some((g) => g.id === filter)) habit.groupId = filter
     setEditor({ habit, editing: false })
   }
   useEffect(() => {
@@ -109,6 +113,16 @@ export default function HabitBoard({
     setSearch('')
     notify(editor?.editing ? '习惯已更新' : '新习惯已加入，慢慢开始吧。')
   }
+  function removeGroup(id: string) {
+    onChange((d) => ({
+      ...d,
+      habitGroups: d.habitGroups?.filter((g) => g.id !== id),
+      habits: d.habits?.map((h) => (h.groupId === id ? { ...h, groupId: '' } : h)),
+    }))
+    if (filter === id) setFilter('ungrouped')
+    setDeletingGroup(null)
+    notify('分组已删除')
+  }
   function record(habit: Habit, recordDay: string, value: number) {
     if (
       recordDay > today ||
@@ -127,7 +141,7 @@ export default function HabitBoard({
       value === 0
         ? '已撤销这一天的记录'
         : value >= habit.goal.target
-          ? `${habit.name}已达标，今天又积累了一点。`
+          ? `${habit.name}已达标`
           : '已保存，继续按自己的节奏来。',
     )
   }
@@ -144,15 +158,11 @@ export default function HabitBoard({
   return (
     <>
       <aside className="sidebar habit-sidebar">
-        <div className="workspace-name">
-          <div className="workspace-avatar">
-            <Icon name="Leaf" size={17} />
-          </div>
-          <div>
-            <strong>我的生活空间</strong>
-            <span>一点一滴，慢慢成为</span>
-          </div>
-        </div>
+        <WorkspaceName
+          name={data.preferences.name}
+          subtitle="一点一滴，慢慢成为"
+          onChange={onChange}
+        />
         <nav className="smart-nav" aria-label="习惯筛选">
           {[
             { id: 'today', name: '今日习惯', icon: 'Sun', count: scheduled.length - done },
@@ -184,15 +194,25 @@ export default function HabitBoard({
           </div>
           <div className="habit-group-nav">
             {groups.map((g) => (
-              <button
-                className={`side-row ${filter === g.id ? 'active' : ''}`}
-                key={g.id}
-                onClick={() => setFilter(g.id)}
-              >
-                <i style={{ background: g.color }} />
-                <span>{g.name}</span>
-                <small>{habits.filter((h) => h.groupId === g.id).length}</small>
-              </button>
+              <div className="habit-group-row" key={g.id}>
+                <button
+                  className={`side-row ${filter === g.id ? 'active' : ''}`}
+                  onClick={() => setFilter(g.id)}
+                >
+                  <i style={{ background: g.color }} />
+                  <span>{g.name}</span>
+                  <small>{habits.filter((h) => h.groupId === g.id).length}</small>
+                </button>
+                <button
+                  type="button"
+                  className="icon-button habit-group-delete"
+                  aria-label={`删除分组 ${g.name}`}
+                  title="删除分组"
+                  onClick={() => setDeletingGroup(g)}
+                >
+                  <Icon name="Trash2" size={14} />
+                </button>
+              </div>
             ))}
             <button
               className={`side-row ${filter === 'ungrouped' ? 'active' : ''}`}
@@ -230,7 +250,8 @@ export default function HabitBoard({
         <div className="habit-topline">
           <div className="breadcrumb">
             <Icon name="Flame" size={14} />
-            打卡<span>/</span>日常习惯
+            打卡<span>/</span>
+            <h1 className="breadcrumb-heading">日常打卡</h1>
           </div>
           <div className="habit-topline-right">
             <span className={`save-status ${status}`} title={saveError || '更改会自动保存到本机'}>
@@ -258,65 +279,25 @@ export default function HabitBoard({
           </div>
         </div>
         <div className="habit-main-scroll">
-          <header className="habit-heading">
-            <div>
-              <span className="eyebrow">
-                {parseDate(today).getMonth() + 1} 月 {parseDate(today).getDate()} 日 · 星期
-                {weekdays[parseDate(today).getDay()]}
-              </span>
-              <h1>
-                日常打卡 <Icon name="Sprout" size={27} />
-              </h1>
-              <p>把微小的坚持，变成喜欢的日常。</p>
+          <div className="module-summary-row">
+            <CompletionSummary
+              label={day === today ? '今日达标' : `${shortDate(day)}达标`}
+              completed={done}
+              total={scheduled.length}
+            />
+            <div className="module-summary-actions">
+              <button type="button" className="button primary" onClick={() => create()}>
+                <Icon name="Plus" size={16} />
+                新建习惯
+              </button>
             </div>
-            <button className="button primary" onClick={() => create()}>
-              <Icon name="Plus" size={16} />
-              新建习惯
-            </button>
-          </header>
-          <section className="habit-day-summary">
-            <div>
-              <span className="habit-summary-kicker">
-                <i /> A LITTLE BETTER, EVERY DAY
-              </span>
-              <h2>
-                {done === scheduled.length && done
-                  ? '今天的每一份坚持，都值得被看见。'
-                  : '让好习惯，在日常里慢慢生长。'}
-              </h2>
-              <p>
-                {day === today ? '今日' : shortDate(day)}已达标 <strong>{done}</strong> /{' '}
-                {scheduled.length} 个习惯<span>每一次行动，都是在靠近自己。</span>
-              </p>
-              <div className="habit-summary-track">
-                <i style={{ width: `${percent}%` }} />
-              </div>
-            </div>
-            <div
-              className="habit-summary-ring"
-              style={{ '--completion': `${percent}%` } as React.CSSProperties}
-            >
-              <div>
-                <strong>
-                  {percent}
-                  <small>%</small>
-                </strong>
-                <span>完成度</span>
-              </div>
-            </div>
-            <span className="habit-summary-deco" aria-hidden="true">
-              <Icon name="Leaf" size={90} />
-            </span>
-          </section>
+          </div>
           <section className="habit-week-section">
             <div className="habit-week-heading">
               <div>
                 <strong>
                   {parseDate(day).getFullYear()} 年 {parseDate(day).getMonth() + 1} 月
                 </strong>
-                <span>
-                  {day === today ? '给今天留一点成长的痕迹' : `${shortDate(day)}的习惯记录`}
-                </span>
               </div>
               <div>
                 <button
@@ -409,103 +390,105 @@ export default function HabitBoard({
             view === 'cards' ? (
               <div className="habit-card-grid">
                 {visible.map((habit) => {
-                  const value = habitValue(habit, day),
-                    done = habitDone(habit, day),
-                    scheduled = habitOccursOn(habit, day),
-                    allowed = scheduled && day <= today
-                  const group = groups.find((g) => g.id === habit.groupId)
+                  const count = Object.values(habit.records).filter(
+                    (entry) => entry.value > 0,
+                  ).length
+                  const streak = habitStreak(habit, today)
                   return (
                     <article
-                      tabIndex={0}
                       key={habit.id}
                       aria-label={`习惯 ${habit.name}`}
-                      className={`habit-card ${selected === habit.id && showDetails ? 'selected' : ''} ${done ? 'completed' : ''}`}
+                      className={`habit-card ${selected === habit.id && showDetails ? 'selected' : ''}`}
                       style={{ '--habit-color': habit.color } as React.CSSProperties}
                       onClick={() => choose(habit.id)}
-                      onKeyDown={(e) => {
-                        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                          e.preventDefault()
-                          choose(habit.id)
-                        }
-                      }}
                     >
-                      <div className="habit-card-top">
-                        <span className="habit-card-icon">
-                          <Icon name={habit.icon} size={20} />
-                        </span>
-                        <div>
-                          <h3>{habit.name}</h3>
-                          <span>{group?.name || '未分组'}</span>
-                        </div>
-                        <button
-                          className="icon-button"
-                          title="编辑习惯"
-                          aria-label={`编辑卡片 ${habit.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setEditor({ habit, editing: true })
-                          }}
-                        >
-                          <Icon name="MoreHorizontal" size={16} />
-                        </button>
-                      </div>
-                      <p className="habit-card-goal">
-                        <Icon name="Repeat2" size={12} />
-                        {habitFrequencyText(habit)}
-                        <i />
-                        {habit.goal.type === 'check'
-                          ? '完成即打卡'
-                          : `${habit.goal.target} ${habit.goal.unit} / 计划日`}
-                      </p>
-                      <div className="habit-card-week" aria-label="最近七天打卡强度">
-                        {Array.from({ length: 7 }, (_, i) => addDays(day, i - 6)).map((d) => (
-                          <span
-                            className={`habit-cell intensity-${habitIntensity(habit, d)} ${d === day ? 'current' : ''}`}
-                            key={d}
-                            title={`${d} · ${habitValue(habit, d)} ${habit.goal.unit}`}
+                      <div className="habit-card-info">
+                        <div className="habit-card-name">
+                          <Icon name={habit.icon} size={13} />
+                          <h3>
+                            <button
+                              type="button"
+                              title={`${habit.name} · ${habitGoalText(habit)}`}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                choose(habit.id)
+                              }}
+                            >
+                              {habit.name}
+                            </button>
+                          </h3>
+                          <button
+                            type="button"
+                            className="habit-card-edit"
+                            title="编辑习惯"
+                            aria-label={`编辑卡片 ${habit.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setEditor({ habit, editing: true })
+                            }}
                           >
-                            {habitDone(habit, d) && <Icon name="Check" size={10} />}
+                            <Icon name="Pencil" size={11} />
+                          </button>
+                        </div>
+                        <div className="habit-card-stats">
+                          <span title={`打卡 ${count} 次`}>
+                            <Icon name="Zap" size={12} />
+                            {count}
                           </span>
-                        ))}
-                        <span className="habit-streak">
-                          <Icon name="Flame" size={12} />
-                          {habitStreak(habit, today)} 次
-                        </span>
+                          <span title={`连续达标 ${streak} 次`}>
+                            <Icon name="Flame" size={12} />
+                            {streak}
+                          </span>
+                        </div>
                       </div>
-                      <div className="habit-card-bottom">
-                        <span className={done ? 'done' : ''}>
-                          {!scheduled ? (
-                            '非计划日'
-                          ) : day > today ? (
-                            '还未开始'
-                          ) : habit.goal.type === 'quantity' ? (
-                            <>
-                              <strong>{value}</strong> / {habit.goal.target} {habit.goal.unit}
-                              {value >= habit.goal.target * 2 && <em>超额完成</em>}
-                            </>
-                          ) : done ? (
-                            '已完成今日打卡'
-                          ) : (
-                            '等待今天的坚持'
-                          )}
-                        </span>
-                        <button
-                          disabled={!allowed}
-                          className={`habit-card-action ${done ? 'done' : ''}`}
-                          aria-label={
-                            habit.goal.type === 'check'
-                              ? `${done ? '撤销' : '打卡'} ${habit.name}`
-                              : `记录 ${habit.name}`
-                          }
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            choose(habit.id)
-                            if (habit.goal.type === 'check') record(habit, day, done ? 0 : 1)
-                          }}
-                        >
-                          <Icon name={done ? 'Check' : 'Plus'} size={13} />
-                          {habit.goal.type === 'check' ? (done ? '已打卡' : '打卡') : '记录'}
-                        </button>
+                      <div className="habit-card-week" role="group" aria-label="本周打卡">
+                        {week.map((date, index) => {
+                          const value = habitValue(habit, date)
+                          const done = habitDone(habit, date)
+                          const check = habit.goal.type === 'check'
+                          const allowed = date <= today && habitOccursOn(habit, date)
+                          const action = allowed
+                            ? check
+                              ? done
+                                ? '撤销打卡'
+                                : '打卡'
+                              : '填写完成量'
+                            : date > today
+                              ? '未来日期'
+                              : '非计划日'
+                          const status = check
+                            ? value
+                              ? '已打卡'
+                              : '未打卡'
+                            : `${value} / ${habit.goal.target} ${habit.goal.unit}`
+                          return (
+                            <button
+                              type="button"
+                              key={date}
+                              className={`habit-cell intensity-${habitIntensity(habit, date)} ${date === day ? 'current' : ''}`}
+                              title={`${date} · ${status} · ${action}`}
+                              aria-label={`${habit.name} ${date} ${action}`}
+                              aria-pressed={check ? done : undefined}
+                              disabled={!allowed}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (check) record(habit, date, done ? 0 : 1)
+                                else
+                                  setRecording({
+                                    id: habit.id,
+                                    day: date,
+                                    amount: value ? String(value) : '',
+                                  })
+                              }}
+                            >
+                              {done && check ? (
+                                <Icon name="Check" size={12} />
+                              ) : (
+                                '一二三四五六日'[index]
+                              )}
+                            </button>
+                          )
+                        })}
                       </div>
                     </article>
                   )
@@ -599,7 +582,7 @@ export default function HabitBoard({
           {habits.some((h) => h.example) && (
             <p className="habit-example-note">
               <Icon name="CircleHelp" size={12} />
-              初次体验包含示例习惯与记录，可直接编辑或删除。
+              这些习惯来自旧版示例，已保留你的修改，可继续编辑或删除。
             </p>
           )}
         </div>
@@ -638,6 +621,45 @@ export default function HabitBoard({
           onClose={() => setEditor(null)}
         />
       )}
+      {recording && recordingHabit && (
+        <Modal
+          title="填写习惯完成量"
+          subtitle={`${recordingHabit.name} · ${recording.day} · ${habitGoalText(recordingHabit)}`}
+          onClose={() => setRecording(null)}
+        >
+          <form
+            className="task-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const amount = Number(recording.amount)
+              if (!recording.amount || !Number.isFinite(amount) || amount < 0) return
+              record(recordingHabit, recording.day, amount)
+              setRecording(null)
+            }}
+          >
+            <label>
+              当天累计完成量（{recordingHabit.goal.unit}）
+              <input
+                type="number"
+                min="0"
+                step="any"
+                required
+                value={recording.amount}
+                onChange={(event) => setRecording({ ...recording, amount: event.target.value })}
+              />
+            </label>
+            <p className="field-hint">保存会更新当天的记录，填 0 可撤销打卡。</p>
+            <div className="modal-footer">
+              <button type="button" className="button secondary" onClick={() => setRecording(null)}>
+                取消
+              </button>
+              <button type="submit" className="button primary">
+                保存记录
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {deleting && (
         <Modal
           title={`删除“${deleting.name}”？`}
@@ -667,6 +689,22 @@ export default function HabitBoard({
               }}
             >
               删除习惯
+            </button>
+          </div>
+        </Modal>
+      )}
+      {deletingGroup && (
+        <Modal
+          title={`删除分组“${deletingGroup.name}”？`}
+          subtitle="组内习惯将移到「未分组」，打卡记录会保留。"
+          onClose={() => setDeletingGroup(null)}
+        >
+          <div className="modal-footer">
+            <button className="button secondary" onClick={() => setDeletingGroup(null)}>
+              取消
+            </button>
+            <button className="button danger-button" onClick={() => removeGroup(deletingGroup.id)}>
+              删除分组
             </button>
           </div>
         </Modal>

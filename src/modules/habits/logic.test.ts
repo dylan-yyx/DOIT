@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createSeed } from '../../core/seed'
 import { validateData } from '../tasks/logic'
 import {
-  createHabitSeed,
+  createHabitExamples,
   habitDone,
   habitIntensity,
   habitMonthStats,
@@ -89,12 +89,12 @@ describe('习惯数据与旧版备份兼容', () => {
     expect(validateData(data)).toBe(true)
     const upgraded = withHabitData(data)
     expect(upgraded.tasks).toEqual(data.tasks)
-    expect(upgraded.habits).toHaveLength(6)
+    expect(upgraded.habits).toHaveLength(0)
     expect(withHabitData({ ...upgraded, habits: [] }).habits).toEqual([])
     expect(validateData(upgraded)).toBe(true)
   })
   it('示例数据有效；坏的打卡数值、目标、日期、分组与重复 ID 被拒绝', () => {
-    const data = { ...createSeed(), ...createHabitSeed('2026-11-08') }
+    const data = { ...createSeed(), ...createHabitExamples('2026-11-08') }
     expect(validateData(data)).toBe(true)
     for (const patch of [
       { goal: { type: 'quantity', target: 0, unit: '分钟' } },

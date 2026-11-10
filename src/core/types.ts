@@ -19,6 +19,12 @@ export interface Tag {
   id: string
   name: string
   color: string
+  groupId?: string
+  pinned?: boolean
+}
+export interface TagGroup {
+  id: string
+  name: string
 }
 export interface ChecklistItem {
   id: string
@@ -42,6 +48,7 @@ export interface Task {
   tagIds: string[]
   notes: string
   kind: 'normal' | 'progress'
+  dateMode?: 'single' | 'range'
   startDate: string
   dueDate: string
   timeMode: 'allday' | 'point' | 'range'
@@ -84,7 +91,10 @@ export interface AppData {
   folders: Folder[]
   lists: TaskList[]
   tags: Tag[]
+  tagGroups?: TagGroup[]
   tasks: Task[]
+  taskSidebarOrder?: string[]
+  taskListSorting?: Record<string, { mode: TaskSort; order?: string[] }>
   habits?: Habit[]
   habitGroups?: HabitGroup[]
   finance?: FinanceData
@@ -93,7 +103,9 @@ export interface AppData {
     name: string
     weekStartsOn: 1
     showCompleted: boolean
+    taskSort?: 'time' | 'title' | 'priority' | 'created'
     appearance?: Appearance
+    exampleCleanupDone?: boolean
   }
 }
 export type ThemeId =
@@ -109,6 +121,7 @@ export interface FinanceAccount {
   name: string
   icon: string
   color: string
+  note?: string
   openingBalance: number // 金额统一以分存储
 }
 export interface FinanceCategory {
@@ -141,6 +154,7 @@ export interface FinanceData {
   accounts: FinanceAccount[]
   categories: FinanceCategory[]
   entries: FinanceEntry[]
+  categoryVersion?: 2
 }
 export type AssetCategory = 'fund' | 'stock' | 'wealth' | 'bond' | 'gold' | 'other'
 export interface AssetProduct {
@@ -176,10 +190,11 @@ export interface AssetsData {
 export type Filter =
   | { kind: 'smart'; id: 'today' | 'upcoming' | 'all' | 'inbox' | 'completed' }
   | { kind: 'list' | 'tag'; id: string }
-export type View = 'list' | 'week' | 'month'
+export type View = 'list' | 'day' | 'week' | 'month'
+export type TaskSort = 'time' | 'title' | 'priority' | 'created' | 'custom'
 export interface DesktopAPI {
   load: () => Promise<AppData | null>
-  save: (data: AppData) => Promise<void>
+  save: (data: AppData, beforeClear?: boolean) => Promise<string | undefined>
   exportData: (data: AppData) => Promise<boolean>
   importData: () => Promise<unknown | null>
   dataPath: () => Promise<string>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { addDays, dateKey, daysBetween, monthGrid, startOfWeek } from '../../core/dates'
-import { createSeed } from '../../core/seed'
+import { createLegacySeed as createSeed } from '../../core/legacy-examples'
 import {
   checksFor,
   isCompleted,
@@ -8,6 +8,8 @@ import {
   occursOn,
   progressInfo,
   progressValue,
+  taskDateDraft,
+  taskDateError,
   toggleCheck,
   toggleComplete,
   validateData,
@@ -27,6 +29,39 @@ describe('日期与重复规则', () => {
   it('普通事项只在到期日出现', () => {
     expect(occursOn(task(), '2026-11-02')).toBe(true)
     expect(occursOn(task(), '2026-11-03')).toBe(false)
+  })
+  it('旧版普通事项保留原来的单日安排', () => {
+    const legacy = { ...task(), startDate: '2026-11-01' }
+    expect(occursOn(legacy, legacy.startDate)).toBe(false)
+    expect(taskDateDraft(legacy)).toMatchObject({
+      dateMode: 'single',
+      startDate: legacy.dueDate,
+      dueDate: legacy.dueDate,
+    })
+  })
+  it('普通时间段包含起止日期，期间各天共享完成状态', () => {
+    const range = { ...task(), dateMode: 'range' as const, dueDate: '2026-11-04' }
+    expect([1, 2, 3, 4, 5].map((day) => occursOn(range, `2026-11-0${day}`))).toEqual([
+      false,
+      true,
+      true,
+      true,
+      false,
+    ])
+    expect(isCompleted(toggleComplete(range, range.startDate), range.dueDate)).toBe(true)
+  })
+  it('跨日时间段接受次日凌晨结束，单日时间段要求结束时间晚于开始', () => {
+    const range = {
+      ...task(),
+      dateMode: 'range' as const,
+      dueDate: '2026-11-03',
+      timeMode: 'range' as const,
+      startTime: '22:00',
+      endTime: '06:00',
+    }
+    expect(taskDateError(range)).toBe('')
+    expect(validateData({ ...createSeed(), tasks: [range] })).toBe(true)
+    expect(taskDateError({ ...range, dueDate: range.startDate })).toContain('结束时间')
   })
   it('没有日期的事项不出现在日历', () =>
     expect(occursOn({ ...task(), dueDate: '', startDate: '' }, '2026-11-02')).toBe(false))

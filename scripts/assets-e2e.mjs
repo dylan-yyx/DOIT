@@ -49,12 +49,15 @@ async function createProduct({ name, platform, cost, value, quantity, price, typ
   await d.getByLabel('产品名称', { exact: true }).fill(name)
   await d.getByLabel('投资类型', { exact: true }).selectOption(type)
   await d.getByLabel('持有平台', { exact: true }).fill(platform)
-  await d.getByLabel('期初日期', { exact: true }).fill(localDate(-8))
-  await d.getByLabel('持仓成本（元）', { exact: true }).fill(cost)
-  if (type === 'fund') {
-    await d.getByLabel('持有份额 / 数量').fill(quantity)
-    await d.getByLabel('当前单位价格（元）').fill(price)
-  } else await d.getByLabel('当前市值（元）').fill(value)
+  if (cost === undefined) await d.getByLabel('录入已有持仓').uncheck()
+  else {
+    await d.getByLabel('期初日期', { exact: true }).fill(localDate(-8))
+    await d.getByLabel('持仓成本（元）', { exact: true }).fill(cost)
+    if (type === 'fund') {
+      await d.getByLabel('持有份额 / 数量').fill(quantity)
+      await d.getByLabel('当前单位价格（元）').fill(price)
+    } else await d.getByLabel('当前市值（元）').fill(value)
+  }
   await d.getByRole('button', { name: '保存投资', exact: true }).click()
   await expect(d).toBeHidden()
   await saved()
@@ -97,6 +100,24 @@ try {
     price: '11',
   })
   await totals('1,100.00', '1,000.00', '+100.00')
+  await createProduct({ name: '测试未建仓产品', platform: '证券测试', type: 'stock' })
+  await expect(page.locator('.asset-filter-counts')).toContainText('持有 1 项')
+  await expect(page.getByRole('button', { name: /^全部投资/ }).locator('small')).toHaveText('1')
+  await expect(page.locator('.asset-product-link')).toHaveCount(1)
+  await page.getByRole('button', { name: '未建仓 1 项', exact: true }).click()
+  await expect(page.getByLabel('持仓状态', { exact: true })).toHaveValue('pending')
+  await expect(page.locator('.asset-product-link')).toHaveText(
+    '测试未建仓产品证券测试 · 股票 / ETF',
+  )
+  await page.getByRole('button', { name: '设置与数据', exact: true }).click()
+  await page.getByRole('tab', { name: '数据管理', exact: true }).click()
+  const archive = page.getByText('投资档案', { exact: true }).locator('..')
+  await expect(archive.locator('strong')).toHaveText('2')
+  await expect(archive.locator('small')).toHaveText('持有 1 · 未建仓 1')
+  await page.getByRole('button', { name: '关闭弹窗', exact: true }).click()
+  await page.getByRole('button', { name: '投资总览', exact: true }).click()
+  await totals('1,100.00', '1,000.00', '+100.00')
+  console.log('PASS: active count, uninvested product view and settings archive breakdown')
   const wealth = await createProduct({
     name: '测试银行理财',
     platform: '银行测试',
@@ -248,7 +269,7 @@ try {
   const exported = JSON.parse(await fs.readFile(exportPath, 'utf8'))
   assert.deepEqual(exported.assets, (await read()).assets)
   await page.getByRole('button', { name: '导入', exact: true }).click()
-  await expect(dialog('导入这份备份？')).toContainText('2 项投资')
+  await expect(dialog('导入这份备份？')).toContainText('3 项投资')
   await page.getByRole('button', { name: '确认导入', exact: true }).click()
   await saved()
   const beforeRestart = await read()
@@ -267,7 +288,11 @@ try {
   await app.close()
   await launch()
   assert.deepEqual((await read()).assets, beforeRestart.assets)
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1100, 780))
+  await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    window.unmaximize()
+    window.setSize(1100, 780)
+  })
   await page.waitForTimeout(200)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   assert.equal(

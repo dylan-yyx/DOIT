@@ -278,16 +278,22 @@ export default function HabitDetail({
           )}
           {error && <p className="error-text">{error}</p>}
         </section>
-        <div className="habit-detail-bottom">
-          <span>
-            <Icon name="CalendarDays" size={13} />
-            开始于 {habit.startDate.replaceAll('-', '.')}
-          </span>
-          <button onClick={onDelete} aria-label={`删除习惯 ${habit.name}`} title="删除习惯">
-            <Icon name="Trash2" size={14} />
-          </button>
-        </div>
       </div>
+      <footer className="habit-detail-bottom">
+        <span>
+          <Icon name="CalendarDays" size={13} />
+          开始于 {habit.startDate.replaceAll('-', '.')}
+        </span>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onDelete}
+          aria-label={`删除习惯 ${habit.name}`}
+          title="删除习惯"
+        >
+          <Icon name="Trash2" size={15} />
+        </button>
+      </footer>
     </aside>
   )
 }
